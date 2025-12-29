@@ -177,6 +177,8 @@ with tab_creds:
                             progress_bar.progress((i + 1) / len(creds))
                             
                         st.success("检查完成！")
+                        # Clear cache to force reload
+                        st.cache_data.clear()
                         time.sleep(1)
                         st.rerun()
 
@@ -875,3 +877,69 @@ with tab_tools:
             st.error("缺少依赖库 `eth-account`。请联系管理员安装。")
         except Exception as e:
             st.error(f"生成失败: {str(e)}")
+
+    st.divider()
+    
+    st.subheader("Discord 自动领水机 (Shardeum)")
+    st.markdown("配置参数并启动后台领水脚本。请确保已准备好 `Discord Token` 和 `钱包地址`。")
+    
+    # Inputs
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        f_tokens = st.text_area("Discord Tokens (每行一个)", height=150, placeholder="MTAx...")
+    with col_f2:
+        f_wallets = st.text_area("钱包地址 (每行一个)", height=150, placeholder="0x123...")
+        
+    f_proxies = st.text_area("代理列表 (格式: http://user:pass@ip:port, 每行一个)", height=100, placeholder="http://user:pass@1.2.3.4:3128")
+    
+    if st.button("🚀 启动自动领水"):
+        if not f_tokens or not f_wallets:
+            st.error("请填写 Tokens 和 钱包地址")
+        else:
+            # Save files
+            with open("discord_tokens.txt", "w", encoding="utf-8") as f:
+                f.write(f_tokens.strip())
+            with open("wallets.csv", "w", encoding="utf-8") as f:
+                f.write(f_wallets.strip())
+            if f_proxies.strip():
+                with open("proxies.txt", "w", encoding="utf-8") as f:
+                    f.write(f_proxies.strip())
+            
+            # Execute script via subprocess
+            import subprocess
+            
+            st.info("正在启动领水脚本... 请查看下方日志")
+            
+            try:
+                # Use sys.executable to ensure we use the same python env
+                import sys
+                process = subprocess.Popen(
+                    [sys.executable, "discord_faucet.py"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+                
+                # Stream output
+                log_placeholder = st.empty()
+                full_log = ""
+                
+                while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+                    if line:
+                        full_log += line
+                        # Keep only last 20 lines for display to prevent lag
+                        display_log = "\n".join(full_log.split("\n")[-20:])
+                        log_placeholder.code(display_log, language="bash")
+                        
+                if process.returncode == 0:
+                    st.success("脚本执行完成！")
+                else:
+                    st.error("脚本执行异常退出")
+                    
+            except Exception as e:
+                st.error(f"启动失败: {e}")
