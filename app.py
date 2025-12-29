@@ -426,4 +426,4 @@ with tab_manage:
                                         st.error(f"关闭失败: {res['msg']}")
                             else:
                                 st.error("无法找到该实例对应的凭证（可能已被删除）。")
-</toolcall_result>
+
