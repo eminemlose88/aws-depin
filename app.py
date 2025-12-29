@@ -44,6 +44,18 @@ if not user:
     login_page()
     st.stop()
 
+# Force refresh user role from DB to ensure instant admin access after DB update
+if user:
+    try:
+        current_profile = get_user_profile(user.id)
+        if current_profile:
+            role = current_profile.get("role", "user")
+            st.session_state["user_role"] = role
+            # Optional: Debug info (remove in production)
+            # st.sidebar.caption(f"Debug Role: {role}") 
+    except Exception as e:
+        print(f"Role refresh failed: {e}")
+
 # --- Admin Mode Router ---
 if "admin_mode" in st.session_state and st.session_state["admin_mode"]:
     admin_dashboard()
