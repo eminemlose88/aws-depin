@@ -509,7 +509,7 @@ with tab_manage:
                         selected_ssh_instance = None
                     else:
                         selected_ssh_instance = st.selectbox(
-                            "选择目标实例",
+                            f"选择目标实例 (匹配: {len(filtered_instances)})",
                             [d['Instance ID'] for d in filtered_instances],
                             format_func=lambda x: f"{x} - {next((d['Project'] for d in filtered_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_instances if d['Instance ID'] == x), '')})"
                         )
@@ -658,11 +658,11 @@ with tab_manage:
             active_instances = [d for d in display_data if d['Status'] not in ['terminated', 'shutting-down', 'account-suspended']]
             
             # Search for Terminate Instance
-            term_search_term = st.text_input("🔍 搜索要关闭的实例 (ID/IP) - 输入后按回车筛选", key="term_inst_search").strip().lower()
+            term_search_term = st.text_input("🔍 搜索要关闭的实例 (ID/IP/项目/账号) - 输入后按回车筛选", key="term_inst_search").strip().lower()
             
             filtered_term_instances = []
             for d in active_instances:
-                search_str = f"{d['Instance ID']} {d['IP Address']}".lower()
+                search_str = f"{d['Instance ID']} {d['IP Address']} {d['Project']} {d['Account']}".lower()
                 if not term_search_term or term_search_term in search_str:
                     filtered_term_instances.append(d)
             
@@ -670,7 +670,12 @@ with tab_manage:
                  st.caption("无匹配实例")
                  instance_to_term = None
             else:
-                instance_to_term = st.selectbox("选择要关闭的实例", [d['Instance ID'] for d in filtered_term_instances], key="term_select") if filtered_term_instances else None
+                instance_to_term = st.selectbox(
+                    f"选择要关闭的实例 (匹配: {len(filtered_term_instances)})", 
+                    [d['Instance ID'] for d in filtered_term_instances], 
+                    key="term_select",
+                    format_func=lambda x: f"{x} - {next((d['Project'] for d in filtered_term_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_term_instances if d['Instance ID'] == x), '')})"
+                ) if filtered_term_instances else None
             
             if instance_to_term and st.button("🛑 关闭实例", type="primary"):
                 target = next((d for d in display_data if d['Instance ID'] == instance_to_term), None)
