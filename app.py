@@ -333,6 +333,10 @@ with tab_manage:
     col_refresh, col_scan = st.columns([1, 4])
     with col_refresh:
         if st.button("🔄 深度刷新 (项目状态)", help="同时检查AWS实例状态和项目运行情况"):
+            # Clear cache to force reload
+            if "display_data" in st.session_state:
+                del st.session_state["display_data"]
+            
             with st.spinner("正在进行全量深度检查..."):
                 # 1. Fetch current instances from DB
                 current_instances = get_user_instances(user.id)
@@ -420,71 +424,83 @@ with tab_manage:
                     progress_bar.progress(1.0)
                     status_text.empty()
                     st.success(f"扫描完成！新增 {total_new}，更新 {total_updated}。")
+                    # Clear cache to reflect new data
+                    if "display_data" in st.session_state:
+                        del st.session_state["display_data"]
                     time.sleep(2)
                     st.rerun()
 
-    with st.spinner("正在同步数据..."):
-        db_instances = get_user_instances(user.id)
+    # Load data (Cached or Fresh)
+    if "display_data" not in st.session_state:
+        with st.spinner("正在同步数据..."):
+            db_instances = get_user_instances(user.id)
+            
+            if not db_instances:
+                st.info("暂无实例。")
+                display_data = []
+            else:
+                # ... (Existing grouping logic) ...
+                batch_map = {}
+                cred_lookup = {c['id']: c for c in creds}
+
+                for inst in db_instances:
+                    c_id = inst['credential_id']
+                    if not c_id or c_id not in cred_lookup: continue
+                    r = inst['region']
+                    if c_id not in batch_map: batch_map[c_id] = {}
+                    if r not in batch_map[c_id]: batch_map[c_id][r] = []
+                    batch_map[c_id][r].append(inst['instance_id'])
+                
+                real_time_status = {}
+                for c_id, regions in batch_map.items():
+                    cred = cred_lookup[c_id]
+                    if cred.get('status') == 'suspended': continue
+                    for r, i_ids in regions.items():
+                        status_dict = get_instance_status(cred['access_key_id'], cred['secret_access_key'], r, i_ids)
+                        real_time_status.update(status_dict)
+                
+                display_data = []
+                for inst in db_instances:
+                    i_id = inst['instance_id']
+                    cred_info = inst.get('aws_credentials', {})
+                    cred_status = cred_info.get('status', 'active') if cred_info else 'active'
+                    
+                    if cred_status == 'suspended':
+                        current_status = "account-suspended"
+                    else:
+                        current_status = real_time_status.get(i_id, inst['status'])
+                    
+                    if current_status != inst['status'] and current_status != "account-suspended":
+                        update_instance_status(i_id, current_status)
+                    
+                    alias = cred_info.get('alias_name', 'Unknown') if cred_info else 'Unknown'
+                    health = inst.get('health_status', 'Unknown')
+
+                    display_data.append({
+                        "Account": alias,
+                        "Project": inst['project_name'],
+                        "Instance ID": i_id,
+                        "IP Address": inst['ip_address'],
+                        "Region": inst['region'],
+                        "Status": current_status,
+                        "Health": health,
+                        "Created": inst['created_at'][:16].replace('T', ' '),
+                        "_cred_id": inst['credential_id'],
+                        "_has_key": bool(inst.get('private_key'))
+                    })
+            
+            st.session_state["display_data"] = display_data
+    
+    # Use cached data
+    display_data = st.session_state["display_data"]
+    
+    if display_data:
+        df = pd.DataFrame(display_data).drop(columns=["_cred_id", "_has_key"])
+        st.dataframe(df, width="stretch")
         
-        if not db_instances:
-            st.info("暂无实例。")
-        else:
-            # ... (Existing grouping logic) ...
-            batch_map = {}
-            cred_lookup = {c['id']: c for c in creds}
+        st.divider()
 
-            for inst in db_instances:
-                c_id = inst['credential_id']
-                if not c_id or c_id not in cred_lookup: continue
-                r = inst['region']
-                if c_id not in batch_map: batch_map[c_id] = {}
-                if r not in batch_map[c_id]: batch_map[c_id][r] = []
-                batch_map[c_id][r].append(inst['instance_id'])
-            
-            real_time_status = {}
-            for c_id, regions in batch_map.items():
-                cred = cred_lookup[c_id]
-                if cred.get('status') == 'suspended': continue
-                for r, i_ids in regions.items():
-                    status_dict = get_instance_status(cred['access_key_id'], cred['secret_access_key'], r, i_ids)
-                    real_time_status.update(status_dict)
-            
-            display_data = []
-            for inst in db_instances:
-                i_id = inst['instance_id']
-                cred_info = inst.get('aws_credentials', {})
-                cred_status = cred_info.get('status', 'active') if cred_info else 'active'
-                
-                if cred_status == 'suspended':
-                    current_status = "account-suspended"
-                else:
-                    current_status = real_time_status.get(i_id, inst['status'])
-                
-                if current_status != inst['status'] and current_status != "account-suspended":
-                    update_instance_status(i_id, current_status)
-                
-                alias = cred_info.get('alias_name', 'Unknown') if cred_info else 'Unknown'
-                health = inst.get('health_status', 'Unknown')
-
-                display_data.append({
-                    "Account": alias,
-                    "Project": inst['project_name'],
-                    "Instance ID": i_id,
-                    "IP Address": inst['ip_address'],
-                    "Region": inst['region'],
-                    "Status": current_status,
-                    "Health": health,
-                    "Created": inst['created_at'][:16].replace('T', ' '),
-                    "_cred_id": inst['credential_id'],
-                    "_has_key": bool(inst.get('private_key'))
-                })
-            
-            df = pd.DataFrame(display_data).drop(columns=["_cred_id", "_has_key"])
-            st.dataframe(df, width="stretch")
-            
-            st.divider()
-
-            # --- Advanced Actions & Installation ---
+        # --- Advanced Actions & Installation ---
             st.subheader("🛠️ 深度运维 & 项目安装")
             
             col_target, col_actions = st.columns([2, 2])
@@ -548,9 +564,12 @@ with tab_manage:
                                             res = install_project_via_ssh(target_info['IP Address'], pkey, script)
                                             
                                             if res['status'] == 'success':
-                                                update_instance_project(selected_ssh_instance, target_proj)
-                                                st.success(f"安装指令已发送！")
-                                                st.info("请稍后刷新查看状态。")
+                                            update_instance_project(selected_ssh_instance, target_proj)
+                                            # Clear cache
+                                            if "display_data" in st.session_state:
+                                                del st.session_state["display_data"]
+                                            st.success(f"安装指令已发送！")
+                                            st.info("请稍后刷新查看状态。")
                                                 with st.expander("查看输出"):
                                                     st.code(res['output'])
                                             else:
@@ -636,17 +655,20 @@ with tab_manage:
                                     if pkey:
                                         res = install_project_via_ssh(target_data['IP Address'], pkey, script)
                                         if res['status'] == 'success':
-                                            update_instance_project(i_id, target_proj)
-                                            results.append(f"✅ {target_data['IP Address']}: 指令已发送")
-                                        else:
-                                            results.append(f"❌ {target_data['IP Address']}: {res['msg']}")
+                                        update_instance_project(i_id, target_proj)
+                                        results.append(f"✅ {target_data['IP Address']}: 指令已发送")
                                     else:
-                                        results.append(f"❌ {target_data['IP Address']}: 无法获取私钥")
-                                    
-                                    progress_bar.progress((i + 1) / len(target_ids))
+                                        results.append(f"❌ {target_data['IP Address']}: {res['msg']}")
+                                else:
+                                    results.append(f"❌ {target_data['IP Address']}: 无法获取私钥")
                                 
-                                status_area.empty()
-                                st.success("批量安装指令发送完成！")
+                                progress_bar.progress((i + 1) / len(target_ids))
+                            
+                            status_area.empty()
+                            # Clear cache
+                            if "display_data" in st.session_state:
+                                del st.session_state["display_data"]
+                            st.success("批量安装指令发送完成！")
                                 with st.expander("查看详细结果", expanded=True):
                                     for r in results:
                                         st.write(r)
@@ -682,11 +704,14 @@ with tab_manage:
                 if target:
                     cred = cred_lookup.get(target['_cred_id'])
                     if cred:
-                        terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term)
-                        update_instance_status(instance_to_term, "shutting-down")
-                        st.success("已关闭")
-                        time.sleep(1)
-                        st.rerun()
+                            terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term)
+                            update_instance_status(instance_to_term, "shutting-down")
+                            # Clear cache
+                            if "display_data" in st.session_state:
+                                del st.session_state["display_data"]
+                            st.success("已关闭")
+                            time.sleep(1)
+                            st.rerun()
 
 # ====================
 # TAB 4: Billing Center
