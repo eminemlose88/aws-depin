@@ -70,3 +70,50 @@ def launch_instance(ak, sk, region, user_data, project_name):
 
     except Exception as e:
         return {'status': 'error', 'msg': str(e)}
+
+def get_instance_status(ak, sk, region, instance_ids):
+    """
+    Get the real-time status of specified instances from AWS.
+    Returns a dictionary mapping instance_id to state (e.g., 'running', 'terminated').
+    """
+    if not instance_ids:
+        return {}
+
+    try:
+        session = boto3.Session(
+            aws_access_key_id=ak,
+            aws_secret_access_key=sk,
+            region_name=region
+        )
+        ec2 = session.client('ec2')
+
+        response = ec2.describe_instances(InstanceIds=instance_ids)
+        
+        status_map = {}
+        for reservation in response['Reservations']:
+            for instance in reservation['Instances']:
+                status_map[instance['InstanceId']] = instance['State']['Name']
+        
+        return status_map
+
+    except Exception as e:
+        print(f"Error fetching instance status for region {region}: {e}")
+        return {}
+
+def terminate_instance(ak, sk, region, instance_id):
+    """
+    Terminate an EC2 instance.
+    """
+    try:
+        session = boto3.Session(
+            aws_access_key_id=ak,
+            aws_secret_access_key=sk,
+            region_name=region
+        )
+        ec2 = session.client('ec2')
+
+        ec2.terminate_instances(InstanceIds=[instance_id])
+        return {'status': 'success', 'msg': f'Instance {instance_id} terminating...'}
+
+    except Exception as e:
+        return {'status': 'error', 'msg': str(e)}

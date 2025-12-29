@@ -12,7 +12,7 @@ if url and key:
     except Exception as e:
         print(f"Failed to initialize Supabase client: {e}")
 
-def log_instance(instance_id, ip, region, project_name, status="active"):
+def log_instance(access_key_id, instance_id, ip, region, project_name, status="active"):
     """
     Log instance details to Supabase 'instances' table.
     """
@@ -22,6 +22,7 @@ def log_instance(instance_id, ip, region, project_name, status="active"):
 
     try:
         data = {
+            "access_key_id": access_key_id,
             "instance_id": instance_id,
             "ip_address": ip,
             "region": region,
@@ -32,3 +33,38 @@ def log_instance(instance_id, ip, region, project_name, status="active"):
         print(f"Logged instance {instance_id} to database.")
     except Exception as e:
         print(f"Error logging to database: {e}")
+
+def get_user_instances(access_key_id):
+    """
+    Retrieve all instances associated with a specific Access Key ID.
+    Order by created_at descending.
+    """
+    if not supabase:
+        return []
+
+    try:
+        response = supabase.table("instances") \
+            .select("*") \
+            .eq("access_key_id", access_key_id) \
+            .order("created_at", desc=True) \
+            .execute()
+        return response.data
+    except Exception as e:
+        print(f"Error fetching instances: {e}")
+        return []
+
+def update_instance_status(instance_id, new_status):
+    """
+    Update the status of an instance in the database.
+    """
+    if not supabase:
+        return
+
+    try:
+        supabase.table("instances") \
+            .update({"status": new_status}) \
+            .eq("instance_id", instance_id) \
+            .execute()
+        print(f"Updated instance {instance_id} status to {new_status}")
+    except Exception as e:
+        print(f"Error updating instance status: {e}")
