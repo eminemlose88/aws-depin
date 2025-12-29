@@ -21,6 +21,29 @@ if url and key:
     except Exception as e:
         print(f"Failed to initialize Supabase client: {e}")
 
+def check_db_connection():
+    """
+    Check if the database connection is valid and the table exists.
+    Returns True if OK, False otherwise.
+    """
+    if not supabase:
+        return False
+    try:
+        # Try to select 1 row to check if table exists
+        supabase.table("instances").select("id").limit(1).execute()
+        return True
+    except Exception as e:
+        # Check if error contains "relation" and "does not exist"
+        err_msg = str(e).lower()
+        if "relation" in err_msg and "does not exist" in err_msg:
+            st.error("🚨 数据库表尚未创建！")
+            st.warning("请复制项目根目录下的 `schema.sql` 内容，并在 Supabase SQL Editor 中运行它。")
+            with open("schema.sql", "r", encoding="utf-8") as f:
+                st.code(f.read(), language="sql")
+        else:
+            print(f"Database check failed: {e}")
+        return False
+
 def log_instance(access_key_id, instance_id, ip, region, project_name, status="active"):
     """
     Log instance details to Supabase 'instances' table.
@@ -42,6 +65,8 @@ def log_instance(access_key_id, instance_id, ip, region, project_name, status="a
         print(f"Logged instance {instance_id} to database.")
     except Exception as e:
         print(f"Error logging to database: {e}")
+        # If insertion fails, it might be due to missing table, try to warn user in UI if possible
+        # (Though log_instance is usually called in a backend flow, so st.error might not render ideally if inside a spinner)
 
 def get_user_instances(access_key_id):
     """
@@ -50,6 +75,9 @@ def get_user_instances(access_key_id):
     """
     if not supabase:
         return []
+
+    # Perform a quick check before query (optional, or just handle exception)
+    # check_db_connection() # calling this here might be too intrusive UI-wise
 
     try:
         response = supabase.table("instances") \
@@ -60,6 +88,7 @@ def get_user_instances(access_key_id):
         return response.data
     except Exception as e:
         print(f"Error fetching instances: {e}")
+        check_db_connection() # Trigger UI warning if it fails
         return []
 
 def update_instance_status(instance_id, new_status):
