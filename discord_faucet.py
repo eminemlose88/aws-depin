@@ -5,10 +5,42 @@ import csv
 import sys
 import os
 
-# Configuration
-CHANNEL_ID = "1016643264627916800" # Shardeum Faucet Channel
 DISCORD_API_BASE = "https://discord.com/api/v9"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# Configuration
+CHANNEL_ID = "1016643264627916800" # Shardeum Faucet Channel
+# Update: Fallback to Shardeum Faucet Channel ID if changed.
+# The user's screenshot shows 404 Unknown Channel, implying the channel ID might be wrong or the bot has no access.
+# However, the user provided ID 1016643264627916800.
+# Let's try to search in the guild if we can get the guild ID, or the user needs to provide a correct Channel ID.
+# For now, let's allow updating the CHANNEL_ID via environment variable or input file if needed, 
+# but mostly likely the channel ID is simply incorrect or the user is not in that server.
+
+# IMPORTANT: The error 404 Unknown Channel means the bot (user token) cannot see the channel.
+# This happens if:
+# 1. The user is not in the server.
+# 2. The channel ID is wrong.
+# 3. The user is banned from the channel/server.
+
+# Let's add a check to verify channel access.
+
+def check_channel_access(token, channel_id, proxy=None):
+    url = f"{DISCORD_API_BASE}/channels/{channel_id}"
+    headers = {"Authorization": token, "User-Agent": USER_AGENT}
+    proxies = get_proxy_dict(proxy)
+    try:
+        r = requests.get(url, headers=headers, proxies=proxies)
+        if r.status_code == 200:
+            print(f"[+] Channel Access OK: {r.json().get('name')}")
+            return True
+        else:
+            print(f"[-] Channel Access Failed: {r.status_code} {r.text}")
+            return False
+    except Exception as e:
+        print(f"[-] Channel Check Error: {e}")
+        return False
+
 
 def load_file(filename):
     if not os.path.exists(filename):
@@ -181,11 +213,13 @@ def main():
     first_token = tokens[0]
     first_proxy = proxies[0] if proxies else None
     
-    # We need to discover the command structure first
-    # We'll try without proxy first or use the first one
-    proxies_dict = get_proxy_dict(first_proxy)
-    
     print("Initializing discovery...")
+    
+    # Check if channel is accessible
+    if not check_channel_access(first_token, CHANNEL_ID, first_proxy):
+        print("Fatal: Cannot access channel. Please check: 1. Token is valid 2. User is in the server 3. Channel ID is correct.")
+        return
+
     # Note: Search endpoint usually requires no proxy or a clean one.
     meta = get_command_metadata(first_token, CHANNEL_ID)
     
