@@ -66,6 +66,10 @@ def join_guild(token, invite_code, proxy):
         print(f"[-] Request Error: {e}")
         return False
 
+def save_success(token):
+    with open("success_tokens.txt", "a", encoding="utf-8") as f:
+        f.write(token + "\n")
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python discord_joiner.py <invite_code>")
@@ -79,6 +83,10 @@ def main():
         return
 
     print(f"=== Discord Batch Joiner: {invite_code} ===")
+    
+    # Clear previous success file
+    if os.path.exists("success_tokens.txt"):
+        os.remove("success_tokens.txt")
     
     tokens = load_file("discord_tokens.txt")
     proxies = load_file("proxies.txt")
@@ -94,18 +102,20 @@ def main():
     for i, token in enumerate(tokens):
         proxy = proxies[i % len(proxies)] if proxies else None
         
-        print(f"\n[{i+1}/{len(tokens)}] Token: {token[:10]}...")
+        # Flush stdout to ensure real-time logging in Streamlit
+        print(f"\n[{i+1}/{len(tokens)}] Token: {token[:10]}...", flush=True)
         
         if join_guild(token, invite_code, proxy):
             success_count += 1
+            save_success(token)
             delay = random.randint(10, 30)
-            print(f"Sleeping {delay}s...")
+            print(f"Sleeping {delay}s...", flush=True)
             time.sleep(delay)
         else:
-            print("Retrying next...")
+            print("Retrying next...", flush=True)
             time.sleep(5)
             
-    print(f"\nDone. Success: {success_count}/{len(tokens)}")
+    print(f"\nDone. Success: {success_count}/{len(tokens)}", flush=True)
 
 if __name__ == "__main__":
     main()

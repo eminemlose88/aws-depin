@@ -993,6 +993,19 @@ with tab_tools:
                  
                  if process.returncode == 0:
                     st.success("批量加群任务结束！")
+                    
+                    # Check for success file and offer download
+                    import os
+                    if os.path.exists("success_tokens.txt"):
+                        with open("success_tokens.txt", "r", encoding="utf-8") as f:
+                            success_data = f.read()
+                        if success_data:
+                            st.download_button(
+                                label="📥 下载加群成功的账号",
+                                data=success_data,
+                                file_name="success_tokens.txt",
+                                mime="text/plain"
+                            )
                  else:
                     st.error("任务异常退出")
                     
