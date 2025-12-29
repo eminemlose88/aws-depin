@@ -8,7 +8,7 @@ from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health
 from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh
-from billing import check_balance, get_user_profile, add_balance, process_daily_billing, calculate_daily_cost
+from billing import check_balance, get_user_profile, add_balance, process_daily_billing, calculate_daily_cost, BASE_DAILY_FEE, EC2_INSTANCE_FEE, LIGHTSAIL_INSTANCE_FEE, GFW_CHECK_FEE
 
 # Import Admin Dashboard
 from admin import admin_dashboard
