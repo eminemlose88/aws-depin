@@ -1,0 +1,2 @@
+ALTER TABLE aws_credentials ADD COLUMN IF NOT EXISTS vcpu_limit INT DEFAULT 0;
+ALTER TABLE aws_credentials ADD COLUMN IF NOT EXISTS vcpu_used INT DEFAULT 0;

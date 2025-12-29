@@ -156,15 +156,20 @@ with tab_creds:
                         for i, cred in enumerate(creds):
                             # Basic Health Check
                             res = check_account_health(cred['access_key_id'], cred['secret_access_key'])
-                            update_credential_status(cred['id'], res['status'])
+                            # update_credential_status called below with quota info
                             
                             # Quota Check if active
-                            quota_msg = ""
-                            if res['status'] == 'active':
-                                cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region)
-                                quota_msg = f" | 配额: {cap['used']}/{cap['limit']}"
-                            
-                            if res['status'] != 'active':
+                        quota_msg = ""
+                        if res['status'] == 'active':
+                            cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region)
+                            quota_msg = f" | 配额: {cap['used']}/{cap['limit']}"
+                            # Update with quota info
+                            update_credential_status(cred['id'], res['status'], limit=cap['limit'], used=cap['used'])
+                        else:
+                            # Update without quota info if not active
+                            update_credential_status(cred['id'], res['status'])
+                        
+                        if res['status'] != 'active':
                                 st.toast(f"{cred['alias_name']}: {res['msg']}", icon="⚠️")
                             else:
                                 st.toast(f"{cred['alias_name']}: 正常 {quota_msg}", icon="✅")
@@ -216,7 +221,11 @@ with tab_creds:
                     st.markdown(f"⚪ {status}")
             with col4:
                 last_checked = cred.get('last_checked')
+                limit = cred.get('vcpu_limit', 0)
+                used = cred.get('vcpu_used', 0)
+                
                 if last_checked:
+                    st.markdown(f"**配额: {used} / {limit}**")
                     st.caption(f"检查于: {last_checked[:16].replace('T', ' ')}")
                 else:
                     st.caption("从未检查")

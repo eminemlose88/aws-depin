@@ -135,17 +135,21 @@ def delete_aws_credential(cred_id):
     except Exception as e:
         print(f"Error deleting credential: {e}")
 
-def update_credential_status(cred_id, status):
+def update_credential_status(cred_id, status, limit=None, used=None):
     """Update the health status of a credential."""
     client = get_supabase()
     if not client: return
     
     try:
+        data = {
+            "status": status,
+            "last_checked": datetime.utcnow().isoformat()
+        }
+        if limit is not None: data["vcpu_limit"] = limit
+        if used is not None: data["vcpu_used"] = used
+        
         client.table("aws_credentials") \
-            .update({
-                "status": status,
-                "last_checked": datetime.utcnow().isoformat()
-            }) \
+            .update(data) \
             .eq("id", cred_id) \
             .execute()
     except Exception as e:
