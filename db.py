@@ -148,3 +148,63 @@ def update_instance_status(instance_id, new_status):
         print(f"Updated instance {instance_id} status to {new_status}")
     except Exception as e:
         print(f"Error updating instance status: {e}")
+
+def sync_instances(user_id, credential_id, region, aws_instances):
+    """
+    Sync AWS instances with database records.
+    aws_instances: List of dicts from scan_all_instances
+    """
+    if not supabase: return {"new": 0, "updated": 0}
+    
+    stats = {"new": 0, "updated": 0}
+    
+    # 1. Get DB instances for this credential and region
+    try:
+        db_res = supabase.table("instances") \
+            .select("instance_id, status") \
+            .eq("credential_id", credential_id) \
+            .eq("region", region) \
+            .execute()
+        db_map = {r['instance_id']: r['status'] for r in db_res.data}
+    except Exception as e:
+        print(f"Sync DB fetch error: {e}")
+        return stats
+
+    aws_map = {i['instance_id']: i for i in aws_instances}
+
+    # 2. Process AWS instances (New & Update)
+    for aws_id, aws_info in aws_map.items():
+        aws_status = aws_info['status']
+        
+        if aws_id not in db_map:
+            # Found NEW instance
+            if aws_status != 'terminated': # Don't import terminated instances
+                try:
+                    data = {
+                        "user_id": user_id,
+                        "credential_id": credential_id,
+                        "instance_id": aws_id,
+                        "ip_address": aws_info['ip_address'],
+                        "region": region,
+                        "project_name": aws_info['project_name'],
+                        "status": aws_status
+                    }
+                    supabase.table("instances").insert(data).execute()
+                    stats["new"] += 1
+                except Exception as e:
+                    print(f"Error importing instance {aws_id}: {e}")
+        
+        elif db_map[aws_id] != aws_status:
+            # Status changed
+            update_instance_status(aws_id, aws_status)
+            stats["updated"] += 1
+
+    # 3. Process Missing instances (Mark as Terminated)
+    # If in DB (and not terminated) but NOT in AWS list -> likely terminated long ago or region mismatch
+    # (Note: describe_instances usually returns terminated instances for a short while, then they disappear)
+    for db_id, db_status in db_map.items():
+        if db_id not in aws_map and db_status != 'terminated':
+            update_instance_status(db_id, 'terminated')
+            stats["updated"] += 1
+            
+    return stats

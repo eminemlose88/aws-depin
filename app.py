@@ -2,9 +2,9 @@ import streamlit as st
 import json
 import os
 import pandas as pd
-from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance
+from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances
 from templates import PROJECT_REGISTRY, generate_script
-from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances
 from auth import login_page, get_current_user, sign_out
 
 # Set page configuration
@@ -213,8 +213,50 @@ with tab_deploy:
 with tab_manage:
     st.header("全平台实例监控")
     
-    if st.button("🔄 刷新状态"):
-        st.rerun()
+    col_refresh, col_scan = st.columns([1, 4])
+    with col_refresh:
+        if st.button("🔄 刷新状态"):
+            st.rerun()
+            
+    with col_scan:
+        if st.button("🌍 全网扫描 & 同步", help="扫描所有账号下所有区域的实例，并同步到数据库"):
+            if not creds:
+                st.error("请先添加 AWS 凭证")
+            else:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                total_steps = len(creds) * len(AMI_MAPPING)
+                current_step = 0
+                total_new = 0
+                total_updated = 0
+                
+                status_text.text("正在初始化全网扫描...")
+                
+                for cred in creds:
+                    for region_code in AMI_MAPPING.keys():
+                        current_step += 1
+                        progress = current_step / total_steps
+                        progress_bar.progress(progress)
+                        status_text.text(f"正在扫描: {cred['alias_name']} - {region_code}...")
+                        
+                        # 1. Scan AWS
+                        aws_instances = scan_all_instances(
+                            cred['access_key_id'], 
+                            cred['secret_access_key'], 
+                            region_code
+                        )
+                        
+                        # 2. Sync with DB
+                        if aws_instances:
+                            res = sync_instances(user.id, cred['id'], region_code, aws_instances)
+                            total_new += res['new']
+                            total_updated += res['updated']
+                
+                progress_bar.progress(1.0)
+                status_text.empty()
+                st.success(f"扫描完成！发现 {total_new} 台新机器，更新了 {total_updated} 台机器的状态。")
+                time.sleep(2)
+                st.rerun()
 
     with st.spinner("正在同步数据..."):
         # 1. Get all instances for this user from DB

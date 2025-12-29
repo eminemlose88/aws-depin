@@ -100,6 +100,47 @@ def get_instance_status(ak, sk, region, instance_ids):
         print(f"Error fetching instance status for region {region}: {e}")
         return {}
 
+def scan_all_instances(ak, sk, region):
+    """
+    Scan ALL instances in the specified region.
+    Returns a list of dictionaries with instance details.
+    """
+    try:
+        session = boto3.Session(
+            aws_access_key_id=ak,
+            aws_secret_access_key=sk,
+            region_name=region
+        )
+        ec2 = session.client('ec2')
+
+        # List all instances, not just running ones, to catch stopped/terminated
+        response = ec2.describe_instances()
+        
+        instances = []
+        for reservation in response['Reservations']:
+            for instance in reservation['Instances']:
+                # Extract Project tag if exists
+                project_name = 'Unknown'
+                if 'Tags' in instance:
+                    for tag in instance['Tags']:
+                        if tag['Key'] == 'Project':
+                            project_name = tag['Value']
+                            break
+                
+                instances.append({
+                    'instance_id': instance['InstanceId'],
+                    'status': instance['State']['Name'],
+                    'ip_address': instance.get('PublicIpAddress', None),
+                    'project_name': project_name,
+                    'region': region
+                })
+        
+        return instances
+
+    except Exception as e:
+        print(f"Error scanning region {region}: {e}")
+        return []
+
 def terminate_instance(ak, sk, region, instance_id):
     """
     Terminate an EC2 instance.

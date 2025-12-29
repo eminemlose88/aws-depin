@@ -2,7 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 2. 创建 AWS 凭证表 (AWS Credentials)
--- 允许一个用户绑定多个 AWS AK
+-- 允许一个用户绑定多个 AWS AKa
 CREATE TABLE IF NOT EXISTS aws_credentials (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
