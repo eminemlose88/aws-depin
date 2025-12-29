@@ -1,10 +1,17 @@
 import streamlit as st
-from db import supabase
+from db import create_supabase_client
+
+# Note: We do NOT import the global 'supabase' object anymore for auth.
+# We create a new client for each session to prevent session leakage.
 
 def sign_up(email, password):
     """Register a new user with Supabase Auth."""
     try:
-        response = supabase.auth.sign_up({
+        # Create a temporary client for sign up
+        client = create_supabase_client()
+        if not client: return {"error": "Database connection failed"}
+        
+        response = client.auth.sign_up({
             "email": email,
             "password": password
         })
@@ -13,12 +20,21 @@ def sign_up(email, password):
         return {"error": str(e)}
 
 def sign_in(email, password):
-    """Log in an existing user."""
+    """Log in an existing user and store client in session."""
     try:
-        response = supabase.auth.sign_in_with_password({
+        # Create a dedicated client for this user session
+        client = create_supabase_client()
+        if not client: return {"error": "Database connection failed"}
+        
+        response = client.auth.sign_in_with_password({
             "email": email,
             "password": password
         })
+        
+        # If successful, store the authenticated client in session state
+        if response.user:
+            st.session_state["supabase_client"] = client
+            
         return response
     except Exception as e:
         return {"error": str(e)}
@@ -26,17 +42,33 @@ def sign_in(email, password):
 def sign_out():
     """Log out the current user."""
     try:
-        supabase.auth.sign_out()
+        if "supabase_client" in st.session_state:
+            st.session_state["supabase_client"].auth.sign_out()
+            del st.session_state["supabase_client"]
+        
+        if "user" in st.session_state:
+            del st.session_state["user"]
+            
     except Exception as e:
         print(f"Sign out error: {e}")
 
 def get_current_user():
     """Get the currently logged-in user from the session."""
-    try:
-        user = supabase.auth.get_user()
-        return user.user if user else None
-    except Exception:
-        return None
+    # First check if we have a user object in session
+    if "user" in st.session_state:
+        return st.session_state["user"]
+        
+    # If not, check if we have a client and try to fetch user
+    if "supabase_client" in st.session_state:
+        try:
+            user_response = st.session_state["supabase_client"].auth.get_user()
+            if user_response and user_response.user:
+                st.session_state["user"] = user_response.user
+                return user_response.user
+        except Exception:
+            pass
+            
+    return None
 
 def login_page():
     """Render the login/signup page."""

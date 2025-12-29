@@ -16,23 +16,42 @@ elif not url and hasattr(st, "secrets"): # Handle flat secrets structure
     url = st.secrets.get("SUPABASE_URL")
     key = st.secrets.get("SUPABASE_KEY")
 
-supabase: Client = None
+# WARNING: This global client should ONLY be used for initial setup or anonymous requests.
+# It should NOT be used for authenticated user actions to prevent session leakage.
+_global_supabase: Client = None
 if url and key:
     try:
-        supabase = create_client(url, key)
+        _global_supabase = create_client(url, key)
     except Exception as e:
-        print(f"Failed to initialize Supabase client: {e}")
+        print(f"Failed to initialize global Supabase client: {e}")
+
+def create_supabase_client():
+    """Create a new Supabase client instance."""
+    if url and key:
+        return create_client(url, key)
+    return None
+
+def get_supabase():
+    """
+    Get the appropriate Supabase client.
+    Prioritizes the session-specific client if logged in.
+    Fallback to global client (which might be limited by RLS).
+    """
+    if "supabase_client" in st.session_state:
+        return st.session_state["supabase_client"]
+    return _global_supabase
 
 def check_db_connection():
     """
     Check if the database connection is valid and the table exists.
     Returns True if OK, False otherwise.
     """
-    if not supabase:
+    client = get_supabase()
+    if not client:
         return False
     try:
         # Try to select 1 row to check if table exists
-        supabase.table("instances").select("id").limit(1).execute()
+        client.table("instances").select("id").limit(1).execute()
         return True
     except Exception as e:
         # Check if error contains "relation" and "does not exist"
@@ -50,7 +69,8 @@ def check_db_connection():
 
 def add_aws_credential(user_id, alias, ak, sk):
     """Add a new AWS credential for the user."""
-    if not supabase: return None
+    client = get_supabase()
+    if not client: return None
     
     try:
         data = {
@@ -60,7 +80,7 @@ def add_aws_credential(user_id, alias, ak, sk):
             "secret_access_key": sk.strip(),
             "status": "active" # Default status
         }
-        response = supabase.table("aws_credentials").insert(data).execute()
+        response = client.table("aws_credentials").insert(data).execute()
         return response.data
     except Exception as e:
         print(f"Error adding credential: {e}")
@@ -68,10 +88,11 @@ def add_aws_credential(user_id, alias, ak, sk):
 
 def get_user_credentials(user_id):
     """Get all AWS credentials for the user."""
-    if not supabase: return []
+    client = get_supabase()
+    if not client: return []
     
     try:
-        response = supabase.table("aws_credentials") \
+        response = client.table("aws_credentials") \
             .select("*") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
@@ -83,19 +104,21 @@ def get_user_credentials(user_id):
 
 def delete_aws_credential(cred_id):
     """Delete an AWS credential."""
-    if not supabase: return
+    client = get_supabase()
+    if not client: return
     
     try:
-        supabase.table("aws_credentials").delete().eq("id", cred_id).execute()
+        client.table("aws_credentials").delete().eq("id", cred_id).execute()
     except Exception as e:
         print(f"Error deleting credential: {e}")
 
 def update_credential_status(cred_id, status):
     """Update the health status of a credential."""
-    if not supabase: return
+    client = get_supabase()
+    if not client: return
     
     try:
-        supabase.table("aws_credentials") \
+        client.table("aws_credentials") \
             .update({
                 "status": status,
                 "last_checked": datetime.utcnow().isoformat()
@@ -112,7 +135,8 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
     Log instance details to Supabase 'instances' table with user_id association.
     Encodes private key if provided.
     """
-    if not supabase:
+    client = get_supabase()
+    if not client:
         print("Supabase credentials not found. Skipping DB logging.")
         return
 
@@ -129,7 +153,7 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
             "status": status,
             "private_key": encrypted_key
         }
-        supabase.table("instances").insert(data).execute()
+        client.table("instances").insert(data).execute()
         print(f"Logged instance {instance_id} to database.")
     except Exception as e:
         print(f"Error logging to database: {e}")
@@ -139,13 +163,14 @@ def get_user_instances(user_id):
     Retrieve all instances associated with a specific User ID.
     Order by created_at descending.
     """
-    if not supabase:
+    client = get_supabase()
+    if not client:
         return []
 
     try:
         # Fetch instances and join with aws_credentials to get alias name if needed
         # Supabase-py join syntax can be tricky, simple select first
-        response = supabase.table("instances") \
+        response = client.table("instances") \
             .select("*, aws_credentials(alias_name, access_key_id)") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
@@ -158,9 +183,10 @@ def get_user_instances(user_id):
 
 def get_instance_private_key(instance_id):
     """Retrieve and decrypt the private key for a specific instance."""
-    if not supabase: return None
+    client = get_supabase()
+    if not client: return None
     try:
-        response = supabase.table("instances") \
+        response = client.table("instances") \
             .select("private_key") \
             .eq("instance_id", instance_id) \
             .single() \
@@ -176,11 +202,12 @@ def update_instance_status(instance_id, new_status):
     """
     Update the status of an instance in the database.
     """
-    if not supabase:
+    client = get_supabase()
+    if not client:
         return
 
     try:
-        supabase.table("instances") \
+        client.table("instances") \
             .update({"status": new_status}) \
             .eq("instance_id", instance_id) \
             .execute()
@@ -190,9 +217,10 @@ def update_instance_status(instance_id, new_status):
 
 def update_instance_health(instance_id, health_status):
     """Update the health check status of an instance."""
-    if not supabase: return
+    client = get_supabase()
+    if not client: return
     try:
-        supabase.table("instances") \
+        client.table("instances") \
             .update({"health_status": health_status}) \
             .eq("instance_id", instance_id) \
             .execute()
@@ -204,13 +232,14 @@ def sync_instances(user_id, credential_id, region, aws_instances):
     Sync AWS instances with database records.
     aws_instances: List of dicts from scan_all_instances
     """
-    if not supabase: return {"new": 0, "updated": 0}
+    client = get_supabase()
+    if not client: return {"new": 0, "updated": 0}
     
     stats = {"new": 0, "updated": 0}
     
     # 1. Get DB instances for this credential and region
     try:
-        db_res = supabase.table("instances") \
+        db_res = client.table("instances") \
             .select("instance_id, status") \
             .eq("credential_id", credential_id) \
             .eq("region", region) \
@@ -239,7 +268,7 @@ def sync_instances(user_id, credential_id, region, aws_instances):
                         "project_name": aws_info['project_name'],
                         "status": aws_status
                     }
-                    supabase.table("instances").insert(data).execute()
+                    client.table("instances").insert(data).execute()
                     stats["new"] += 1
                 except Exception as e:
                     print(f"Error importing instance {aws_id}: {e}")
