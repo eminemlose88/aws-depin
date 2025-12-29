@@ -44,20 +44,62 @@ def check_db_connection():
             print(f"Database check failed: {e}")
         return False
 
-def log_instance(access_key_id, instance_id, ip, region, project_name, status="active"):
+# --- AWS Credentials Management ---
+
+def add_aws_credential(user_id, alias, ak, sk):
+    """Add a new AWS credential for the user."""
+    if not supabase: return None
+    
+    try:
+        data = {
+            "user_id": user_id,
+            "alias_name": alias,
+            "access_key_id": ak.strip(),
+            "secret_access_key": sk.strip()
+        }
+        response = supabase.table("aws_credentials").insert(data).execute()
+        return response.data
+    except Exception as e:
+        print(f"Error adding credential: {e}")
+        return None
+
+def get_user_credentials(user_id):
+    """Get all AWS credentials for the user."""
+    if not supabase: return []
+    
+    try:
+        response = supabase.table("aws_credentials") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .execute()
+        return response.data
+    except Exception as e:
+        print(f"Error fetching credentials: {e}")
+        return []
+
+def delete_aws_credential(cred_id):
+    """Delete an AWS credential."""
+    if not supabase: return
+    
+    try:
+        supabase.table("aws_credentials").delete().eq("id", cred_id).execute()
+    except Exception as e:
+        print(f"Error deleting credential: {e}")
+
+# --- Instance Management ---
+
+def log_instance(user_id, credential_id, instance_id, ip, region, project_name, status="active"):
     """
-    Log instance details to Supabase 'instances' table.
+    Log instance details to Supabase 'instances' table with user_id association.
     """
     if not supabase:
         print("Supabase credentials not found. Skipping DB logging.")
         return
 
-    # Clean AK: remove whitespace
-    access_key_id = access_key_id.strip() if access_key_id else ""
-
     try:
         data = {
-            "access_key_id": access_key_id,
+            "user_id": user_id,
+            "credential_id": credential_id,
             "instance_id": instance_id,
             "ip_address": ip,
             "region": region,
@@ -68,30 +110,27 @@ def log_instance(access_key_id, instance_id, ip, region, project_name, status="a
         print(f"Logged instance {instance_id} to database.")
     except Exception as e:
         print(f"Error logging to database: {e}")
-        # If insertion fails, it might be due to missing table, try to warn user in UI if possible
-        # (Though log_instance is usually called in a backend flow, so st.error might not render ideally if inside a spinner)
 
-def get_user_instances(access_key_id):
+def get_user_instances(user_id):
     """
-    Retrieve all instances associated with a specific Access Key ID.
+    Retrieve all instances associated with a specific User ID.
     Order by created_at descending.
     """
     if not supabase:
         return []
 
-    # Clean AK: remove whitespace
-    access_key_id = access_key_id.strip() if access_key_id else ""
-
     try:
+        # Fetch instances and join with aws_credentials to get alias name if needed
+        # Supabase-py join syntax can be tricky, simple select first
         response = supabase.table("instances") \
-            .select("*") \
-            .eq("access_key_id", access_key_id) \
+            .select("*, aws_credentials(alias_name, access_key_id)") \
+            .eq("user_id", user_id) \
             .order("created_at", desc=True) \
             .execute()
         return response.data
     except Exception as e:
         print(f"Error fetching instances: {e}")
-        check_db_connection() # Trigger UI warning if it fails
+        check_db_connection()
         return []
 
 def update_instance_status(instance_id, new_status):

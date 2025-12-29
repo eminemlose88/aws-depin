@@ -4,7 +4,11 @@ import os
 import pandas as pd
 from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance
 from templates import PROJECT_REGISTRY, generate_script
-from db import log_instance, get_user_instances, update_instance_status
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential
+from auth import login_page, get_current_user, sign_out
+
+# Set page configuration
+st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
 
 CONFIG_FILE = 'config.json'
 
@@ -27,14 +31,25 @@ def save_config(config_data):
     except Exception as e:
         st.sidebar.error(f"保存失败: {e}")
 
-# Set page configuration
-st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
+# Check authentication status
+user = get_current_user()
 
-st.title("AWS DePIN Launcher (Modular)")
-st.markdown("模块化部署平台：支持多种 DePIN 项目一键部署与管理。")
+if not user:
+    login_page()
+    st.stop()
 
-# Tabs for different functionalities
-tab_deploy, tab_manage = st.tabs(["🚀 部署新节点", "⚙️ 管理实例"])
+# --- Main App (Authenticated) ---
+
+st.sidebar.markdown(f"👤 **{user.email}**")
+if st.sidebar.button("登出"):
+    sign_out()
+    st.rerun()
+
+st.title("AWS DePIN Launcher (Pro)")
+st.markdown("多账号管理与一键部署平台。")
+
+# Tabs
+tab_creds, tab_deploy, tab_manage = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控"])
 
 # Load existing config
 config = load_config()
@@ -42,184 +57,275 @@ default_region = config.get('region', 'us-east-1')
 default_project = config.get('project', list(PROJECT_REGISTRY.keys())[0])
 
 # ====================
-# TAB 1: Deploy
+# TAB 1: Credentials Management
+# ====================
+with tab_creds:
+    st.header("AWS 凭证管理")
+    st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
+
+    # Add new credential
+    with st.expander("➕ 添加新凭证", expanded=False):
+        with st.form("add_cred_form"):
+            alias = st.text_input("备注名称 (如: 公司测试号)", placeholder="My AWS Account")
+            ak = st.text_input("Access Key ID", type="password")
+            sk = st.text_input("Secret Access Key", type="password")
+            submitted = st.form_submit_button("保存凭证")
+            if submitted:
+                if not alias or not ak or not sk:
+                    st.error("请填写完整信息")
+                else:
+                    res = add_aws_credential(user.id, alias, ak, sk)
+                    if res:
+                        st.success("凭证添加成功！")
+                        st.rerun()
+                    else:
+                        st.error("添加失败，请重试")
+
+    # List existing credentials
+    creds = get_user_credentials(user.id)
+    if creds:
+        st.subheader("已保存的凭证")
+        for cred in creds:
+            col1, col2, col3, col4 = st.columns([2, 3, 2, 1])
+            with col1:
+                st.markdown(f"**{cred['alias_name']}**")
+            with col2:
+                st.code(cred['access_key_id'])
+            with col3:
+                st.caption(f"添加于: {cred['created_at'][:10]}")
+            with col4:
+                if st.button("🗑️", key=f"del_{cred['id']}", help="删除此凭证"):
+                    delete_aws_credential(cred['id'])
+                    st.rerun()
+    else:
+        st.info("暂无凭证，请先添加。")
+
+# ====================
+# TAB 2: Deploy
 # ====================
 with tab_deploy:
-    # --- Sidebar (Shared Config) ---
-    st.sidebar.header("部署配置")
+    if not creds:
+        st.warning("请先在“凭证管理”页面添加 AWS 凭证。")
+    else:
+        # --- Sidebar (Shared Config) ---
+        st.sidebar.header("部署配置")
 
-    # Region selection
-    region_options = list(AMI_MAPPING.keys())
-    try:
-        r_index = region_options.index(default_region)
-    except ValueError:
-        r_index = 0
-    region = st.sidebar.selectbox("AWS Region", region_options, index=r_index)
+        # Region selection
+        region_options = list(AMI_MAPPING.keys())
+        try:
+            r_index = region_options.index(default_region)
+        except ValueError:
+            r_index = 0
+        region = st.sidebar.selectbox("AWS Region", region_options, index=r_index)
 
-    # Project selection
-    project_options = list(PROJECT_REGISTRY.keys())
-    try:
-        p_index = project_options.index(default_project)
-    except ValueError:
-        p_index = 0
-    project_name = st.sidebar.selectbox("选择项目 (Project)", project_options, index=p_index)
+        # Project selection
+        project_options = list(PROJECT_REGISTRY.keys())
+        try:
+            p_index = project_options.index(default_project)
+        except ValueError:
+            p_index = 0
+        project_name = st.sidebar.selectbox("选择项目 (Project)", project_options, index=p_index)
 
-    # Display Project Description
-    project_info = PROJECT_REGISTRY[project_name]
-    st.sidebar.info(f"**{project_name}**\n\n{project_info['description']}")
+        if st.sidebar.button("保存默认配置"):
+            save_config({'region': region, 'project': project_name})
 
-    if st.sidebar.button("保存默认配置"):
-        save_config({'region': region, 'project': project_name})
+        # --- Main Interface ---
+        st.subheader("1. 选择账号与项目")
+        
+        # Select Credential
+        cred_options = {c['alias_name']: c for c in creds}
+        selected_alias = st.selectbox("选择 AWS 账号", list(cred_options.keys()))
+        selected_cred = cred_options[selected_alias]
 
-    # --- Main Interface ---
-    st.subheader("1. 配置项目参数")
-    st.markdown(f"填写 **{project_name}** 所需的参数：")
+        st.subheader("2. 配置项目参数")
+        project_info = PROJECT_REGISTRY[project_name]
+        st.info(project_info['description'])
+        
+        # Dynamic Form Generation
+        input_params = {}
+        missing_params = []
 
-    # Dynamic Form Generation
-    input_params = {}
-    missing_params = []
+        with st.container(border=True):
+            for param in project_info['params']:
+                val = st.text_input(f"Enter {param}", key=f"param_{project_name}_{param}")
+                input_params[param] = val.strip()
+                if not val.strip():
+                    missing_params.append(param)
 
-    with st.container(border=True):
-        for param in project_info['params']:
-            val = st.text_input(f"Enter {param}", key=f"param_{project_name}_{param}")
-            input_params[param] = val.strip()
-            if not val.strip():
-                missing_params.append(param)
+        st.markdown("---")
 
-    st.subheader("2. AWS 凭证")
-    col1, col2 = st.columns(2)
-    with col1:
-        ak = st.text_input("Access Key ID", type="password", key="deploy_ak")
-    with col2:
-        sk = st.text_input("Secret Access Key", type="password", key="deploy_sk")
-
-    st.markdown("---")
-
-    # Launch Button
-    if st.button("🚀 立即部署", type="primary", use_container_width=True):
-        if not ak or not sk:
-            st.error("❌ 请输入 AWS Access Key 和 Secret Key")
-        elif missing_params:
-            st.error(f"❌ 缺少项目参数: {', '.join(missing_params)}")
-        else:
-            status_container = st.status("正在初始化部署流程...", expanded=True)
-            try:
-                # 1. Generate Script
-                status_container.write("🔨 正在生成 User Data 脚本...")
-                user_data = generate_script(project_name, **input_params)
-                
-                # 2. Launch Instance
-                status_container.write(f"☁️ 正在连接 AWS {region} 并启动实例...")
-                result = launch_instance(ak, sk, region, user_data, project_name)
-                
-                if result['status'] == 'success':
-                    # 3. Log to DB
-                    status_container.write("💾 正在记录部署信息到数据库...")
-                    log_instance(
-                        access_key_id=ak,
-                        instance_id=result['id'],
-                        ip=result['ip'],
-                        region=region,
-                        project_name=project_name,
-                        status="active"
+        # Launch Button
+        if st.button("🚀 立即部署", type="primary", use_container_width=True):
+            if missing_params:
+                st.error(f"❌ 缺少项目参数: {', '.join(missing_params)}")
+            else:
+                status_container = st.status("正在初始化部署流程...", expanded=True)
+                try:
+                    # 1. Generate Script
+                    status_container.write("🔨 正在生成 User Data 脚本...")
+                    user_data = generate_script(project_name, **input_params)
+                    
+                    # 2. Launch Instance
+                    status_container.write(f"☁️ 正在连接 AWS {region} ({selected_alias})...")
+                    result = launch_instance(
+                        selected_cred['access_key_id'], 
+                        selected_cred['secret_access_key'], 
+                        region, 
+                        user_data, 
+                        project_name
                     )
                     
-                    status_container.update(label="部署成功！", state="complete", expanded=False)
-                    st.success(f"✅ {project_name} 部署成功！")
-                    st.info(f"""
-                    **详细信息:**
-                    - **Project:** `{project_name}`
-                    - **Instance ID:** `{result['id']}`
-                    - **Public IP:** `{result['ip']}`
-                    - **Region:** `{region}`
-                    
-                    ⏳ **预计 3-5 分钟后上线**。
-                    """)
-                else:
-                    status_container.update(label="部署失败", state="error", expanded=True)
-                    st.error(f"❌ 启动失败: {result['msg']}")
-                    
-            except Exception as e:
-                status_container.update(label="发生系统错误", state="error")
-                st.error(f"异常详情: {str(e)}")
+                    if result['status'] == 'success':
+                        # 3. Log to DB
+                        status_container.write("💾 正在记录部署信息到数据库...")
+                        log_instance(
+                            user_id=user.id,
+                            credential_id=selected_cred['id'],
+                            instance_id=result['id'],
+                            ip=result['ip'],
+                            region=region,
+                            project_name=project_name,
+                            status="active"
+                        )
+                        
+                        status_container.update(label="部署成功！", state="complete", expanded=False)
+                        st.success(f"✅ {project_name} 部署成功！")
+                        st.info(f"""
+                        **详细信息:**
+                        - **Account:** `{selected_alias}`
+                        - **Instance ID:** `{result['id']}`
+                        - **Public IP:** `{result['ip']}`
+                        - **Region:** `{region}`
+                        
+                        ⏳ **预计 3-5 分钟后上线**。
+                        """)
+                    else:
+                        status_container.update(label="部署失败", state="error", expanded=True)
+                        st.error(f"❌ 启动失败: {result['msg']}")
+                        
+                except Exception as e:
+                    status_container.update(label="发生系统错误", state="error")
+                    st.error(f"异常详情: {str(e)}")
 
 # ====================
-# TAB 2: Manage Instances
+# TAB 3: Manage Instances
 # ====================
 with tab_manage:
-    st.header("实例管理")
-    st.markdown("查看并管理此 Access Key 下的所有实例。")
+    st.header("全平台实例监控")
     
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        manage_ak = st.text_input("Access Key ID", type="password", key="manage_ak")
-    with col_m2:
-        manage_sk = st.text_input("Secret Access Key", type="password", key="manage_sk")
+    if st.button("🔄 刷新状态"):
+        st.rerun()
+
+    with st.spinner("正在同步数据..."):
+        # 1. Get all instances for this user from DB
+        db_instances = get_user_instances(user.id)
         
-    if st.button("🔍 查询我的实例", key="btn_query"):
-        if not manage_ak or not manage_sk:
-            st.error("请输入 AWS 凭证以查询实例。")
+        if not db_instances:
+            st.info("暂无实例。")
         else:
-            with st.spinner("正在从数据库和 AWS 获取数据..."):
-                # 1. Get from DB
-                db_instances = get_user_instances(manage_ak)
+            # 2. Group instances by Credential and Region to optimize AWS calls
+            # Structure: { cred_id: { region: [instance_ids] } }
+            batch_map = {}
+            # Helper to quickly find creds
+            cred_lookup = {c['id']: c for c in creds}
+
+            for inst in db_instances:
+                c_id = inst['credential_id']
+                if not c_id or c_id not in cred_lookup: continue # Skip if cred deleted
                 
-                if not db_instances:
-                    st.warning("未找到该账号的部署记录。")
+                r = inst['region']
+                if c_id not in batch_map: batch_map[c_id] = {}
+                if r not in batch_map[c_id]: batch_map[c_id][r] = []
+                batch_map[c_id][r].append(inst['instance_id'])
+            
+            # 3. Fetch Real-time Status from AWS
+            real_time_status = {} # {instance_id: status}
+            
+            for c_id, regions in batch_map.items():
+                cred = cred_lookup[c_id]
+                for r, i_ids in regions.items():
+                    # Call AWS
+                    status_dict = get_instance_status(
+                        cred['access_key_id'], 
+                        cred['secret_access_key'], 
+                        r, 
+                        i_ids
+                    )
+                    real_time_status.update(status_dict)
+            
+            # 4. Prepare Display Data
+            display_data = []
+            for inst in db_instances:
+                i_id = inst['instance_id']
+                
+                # Determine status
+                # If we couldn't fetch (e.g. cred deleted), keep old status or mark unknown
+                current_status = real_time_status.get(i_id, inst['status'])
+                
+                # If AWS says 'terminated' but DB says 'active', update DB
+                if current_status != inst['status']:
+                    update_instance_status(i_id, current_status)
+                
+                # Get alias
+                cred_info = inst.get('aws_credentials', {})
+                alias = cred_info.get('alias_name', 'Unknown/Deleted') if cred_info else 'Unknown'
+
+                display_data.append({
+                    "Account": alias,
+                    "Project": inst['project_name'],
+                    "Instance ID": i_id,
+                    "IP Address": inst['ip_address'],
+                    "Region": inst['region'],
+                    "Status": current_status,
+                    "Created": inst['created_at'][:16].replace('T', ' '),
+                    "_cred_id": inst['credential_id'] # Hidden for logic
+                })
+            
+            # 5. Render Table
+            df = pd.DataFrame(display_data).drop(columns=["_cred_id"])
+            st.dataframe(df, use_container_width=True)
+            
+            # 6. Action: Terminate
+            st.subheader("⚠️ 实例操作")
+            term_col1, term_col2 = st.columns([3, 1])
+            with term_col1:
+                # Filter out already terminated instances
+                active_instances = [d for d in display_data if d['Status'] not in ['terminated', 'shutting-down']]
+                if not active_instances:
+                    st.caption("没有活跃实例可操作")
+                    instance_to_term = None
                 else:
-                    # 2. Group by region to batch AWS calls
-                    region_map = {}
-                    for inst in db_instances:
-                        r = inst['region']
-                        if r not in region_map:
-                            region_map[r] = []
-                        region_map[r].append(inst['instance_id'])
-                    
-                    # 3. Check Real-time Status
-                    real_time_status = {}
-                    for r, ids in region_map.items():
-                        status_dict = get_instance_status(manage_ak, manage_sk, r, ids)
-                        real_time_status.update(status_dict)
-                    
-                    # 4. Prepare Display Data
-                    display_data = []
-                    for inst in db_instances:
-                        i_id = inst['instance_id']
-                        current_status = real_time_status.get(i_id, "unknown/terminated")
-                        
-                        # Update DB if status changed (optional optimization)
-                        if current_status != inst['status']:
-                            update_instance_status(i_id, current_status)
-                        
-                        display_data.append({
-                            "Project": inst['project_name'],
-                            "Instance ID": i_id,
-                            "IP Address": inst['ip_address'],
-                            "Region": inst['region'],
-                            "AWS Status": current_status,
-                            "Deployed At": inst['created_at']
-                        })
-                    
-                    # 5. Render Table
-                    df = pd.DataFrame(display_data)
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # 6. Action: Terminate
-                    st.subheader("⚠️ 危险操作")
-                    term_col1, term_col2 = st.columns([3, 1])
-                    with term_col1:
-                        instance_to_term = st.selectbox("选择要关闭的实例 ID", [d['Instance ID'] for d in display_data])
-                    with term_col2:
-                        if st.button("🛑 关闭实例", type="primary"):
-                            # Find region for selected instance
-                            target_region = next((d['Region'] for d in display_data if d['Instance ID'] == instance_to_term), None)
-                            if target_region:
+                    instance_to_term = st.selectbox(
+                        "选择要关闭的实例", 
+                        [d['Instance ID'] for d in active_instances],
+                        format_func=lambda x: f"{x} ({next((d['Account'] for d in active_instances if d['Instance ID'] == x), '')})"
+                    )
+            
+            with term_col2:
+                if instance_to_term:
+                    if st.button("🛑 关闭实例", type="primary"):
+                        # Find details
+                        target = next((d for d in display_data if d['Instance ID'] == instance_to_term), None)
+                        if target:
+                            cred_id = target['_cred_id']
+                            region = target['Region']
+                            
+                            # Get creds
+                            cred = cred_lookup.get(cred_id)
+                            if cred:
                                 with st.spinner(f"正在关闭 {instance_to_term}..."):
-                                    res = terminate_instance(manage_ak, manage_sk, target_region, instance_to_term)
+                                    res = terminate_instance(
+                                        cred['access_key_id'], 
+                                        cred['secret_access_key'], 
+                                        region, 
+                                        instance_to_term
+                                    )
                                     if res['status'] == 'success':
-                                        st.success(f"已发送关闭指令: {instance_to_term}")
+                                        st.success("关闭指令已发送")
                                         update_instance_status(instance_to_term, "shutting-down")
+                                        time.sleep(1)
+                                        st.rerun()
                                     else:
                                         st.error(f"关闭失败: {res['msg']}")
                             else:
-                                st.error("无法定位实例区域。")
+                                st.error("无法找到该实例对应的凭证（可能已被删除）。")
