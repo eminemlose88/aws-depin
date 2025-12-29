@@ -595,66 +595,66 @@ with tab_manage:
                                         st.rerun()
 
             # --- 3.1 Batch Project Installation ---
-            st.divider()
-            st.subheader("📦 批量项目安装")
+        st.divider()
+        st.subheader("📦 批量项目安装")
+        
+        # Filter SSH-ready instances
+        ssh_ready_instances = [d for d in display_data if d['Status'] == 'running' and d['_has_key']]
+        
+        if not ssh_ready_instances:
+            st.caption("没有可操作的实例 (需 Running 且有私钥)")
+        else:
+            # Project Selection First
+            col_proj, col_params = st.columns([1, 2])
+            with col_proj:
+                proj_options = list(PROJECT_REGISTRY.keys())
+                target_proj = st.selectbox("选择要安装的项目", proj_options, key="batch_proj_select")
             
-            # Filter SSH-ready instances
-            ssh_ready_instances = [d for d in display_data if d['Status'] == 'running' and d['_has_key']]
-            
-            if not ssh_ready_instances:
-                st.caption("没有可操作的实例 (需 Running 且有私钥)")
-            else:
-                # Project Selection First
-                col_proj, col_params = st.columns([1, 2])
-                with col_proj:
-                    proj_options = list(PROJECT_REGISTRY.keys())
-                    target_proj = st.selectbox("选择要安装的项目", proj_options, key="batch_proj_select")
-                
-                with col_params:
-                    proj_conf = PROJECT_REGISTRY[target_proj]
-                    input_params = {}
-                    for p in proj_conf['params']:
-                        input_params[p] = st.text_input(f"{p}", key=f"batch_inst_{p}").strip()
+            with col_params:
+                proj_conf = PROJECT_REGISTRY[target_proj]
+                input_params = {}
+                for p in proj_conf['params']:
+                    input_params[p] = st.text_input(f"{p}", key=f"batch_inst_{p}").strip()
 
-                # Instance Selection
-                st.write("选择目标实例:")
-                
-                instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Account']}": d['Instance ID'] for d in ssh_ready_instances}
-                selected_inst_labels = st.multiselect(
-                    "勾选实例",
-                    options=list(instance_options.keys()),
-                    default=[]
-                )
-                
-                if st.button("🚀 开始批量安装", type="primary"):
-                    if not selected_inst_labels:
-                        st.error("请选择至少一个实例")
+            # Instance Selection
+            st.write("选择目标实例:")
+            
+            instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Account']}": d['Instance ID'] for d in ssh_ready_instances}
+            selected_inst_labels = st.multiselect(
+                "勾选实例",
+                options=list(instance_options.keys()),
+                default=[]
+            )
+            
+            if st.button("🚀 开始批量安装", type="primary"):
+                if not selected_inst_labels:
+                    st.error("请选择至少一个实例")
+                else:
+                    # Validate Params
+                    missing_params = [p for p in proj_conf['params'] if not input_params.get(p)]
+                    if missing_params:
+                        st.error(f"请填写必要参数: {', '.join(missing_params)}")
                     else:
-                        # Validate Params
-                        missing_params = [p for p in proj_conf['params'] if not input_params.get(p)]
-                        if missing_params:
-                            st.error(f"请填写必要参数: {', '.join(missing_params)}")
+                        allowed, msg = check_balance(user.id)
+                        if not allowed:
+                            st.error(msg)
                         else:
-                            allowed, msg = check_balance(user.id)
-                            if not allowed:
-                                st.error(msg)
-                            else:
-                                # Generate script once
-                                script = generate_script(target_proj, **input_params)
+                            # Generate script once
+                            script = generate_script(target_proj, **input_params)
+                            
+                            progress_bar = st.progress(0)
+                            status_area = st.empty()
+                            results = []
+                            target_ids = [instance_options[l] for l in selected_inst_labels]
+                            
+                            for i, i_id in enumerate(target_ids):
+                                target_data = next(d for d in display_data if d['Instance ID'] == i_id)
+                                status_area.text(f"Installing on {target_data['IP Address']}...")
                                 
-                                progress_bar = st.progress(0)
-                                status_area = st.empty()
-                                results = []
-                                target_ids = [instance_options[l] for l in selected_inst_labels]
-                                
-                                for i, i_id in enumerate(target_ids):
-                                    target_data = next(d for d in display_data if d['Instance ID'] == i_id)
-                                    status_area.text(f"Installing on {target_data['IP Address']}...")
-                                    
-                                    pkey = get_instance_private_key(i_id)
-                                    if pkey:
-                                        res = install_project_via_ssh(target_data['IP Address'], pkey, script)
-                                        if res['status'] == 'success':
+                                pkey = get_instance_private_key(i_id)
+                                if pkey:
+                                    res = install_project_via_ssh(target_data['IP Address'], pkey, script)
+                                    if res['status'] == 'success':
                                         update_instance_project(i_id, target_proj)
                                         results.append(f"✅ {target_data['IP Address']}: 指令已发送")
                                     else:
@@ -673,45 +673,45 @@ with tab_manage:
                                 for r in results:
                                     st.write(r)
 
-            # Terminate (No balance check needed for cleanup?)
-            st.divider()
-            st.subheader("⚠️ 危险操作")
-            
-            active_instances = [d for d in display_data if d['Status'] not in ['terminated', 'shutting-down', 'account-suspended']]
-            
-            # Search for Terminate Instance
-            term_search_term = st.text_input("🔍 搜索要关闭的实例 (ID/IP/项目/账号) - 输入后按回车筛选", key="term_inst_search").strip().lower()
-            
-            filtered_term_instances = []
-            for d in active_instances:
-                search_str = f"{d['Instance ID']} {d['IP Address']} {d['Project']} {d['Account']}".lower()
-                if not term_search_term or term_search_term in search_str:
-                    filtered_term_instances.append(d)
-            
-            if not filtered_term_instances and term_search_term:
-                 st.caption("无匹配实例")
-                 instance_to_term = None
-            else:
-                instance_to_term = st.selectbox(
-                    f"选择要关闭的实例 (匹配: {len(filtered_term_instances)})", 
-                    [d['Instance ID'] for d in filtered_term_instances], 
-                    key="term_select",
-                    format_func=lambda x: f"{x} - {next((d['Project'] for d in filtered_term_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_term_instances if d['Instance ID'] == x), '')})"
-                ) if filtered_term_instances else None
-            
-            if instance_to_term and st.button("🛑 关闭实例", type="primary"):
-                target = next((d for d in display_data if d['Instance ID'] == instance_to_term), None)
-                if target:
-                    cred = cred_lookup.get(target['_cred_id'])
-                    if cred:
-                            terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term)
-                            update_instance_status(instance_to_term, "shutting-down")
-                            # Clear cache
-                            if "display_data" in st.session_state:
-                                del st.session_state["display_data"]
-                            st.success("已关闭")
-                            time.sleep(1)
-                            st.rerun()
+        # Terminate (No balance check needed for cleanup?)
+        st.divider()
+        st.subheader("⚠️ 危险操作")
+        
+        active_instances = [d for d in display_data if d['Status'] not in ['terminated', 'shutting-down', 'account-suspended']]
+        
+        # Search for Terminate Instance
+        term_search_term = st.text_input("🔍 搜索要关闭的实例 (ID/IP/项目/账号) - 输入后按回车筛选", key="term_inst_search").strip().lower()
+        
+        filtered_term_instances = []
+        for d in active_instances:
+            search_str = f"{d['Instance ID']} {d['IP Address']} {d['Project']} {d['Account']}".lower()
+            if not term_search_term or term_search_term in search_str:
+                filtered_term_instances.append(d)
+        
+        if not filtered_term_instances and term_search_term:
+             st.caption("无匹配实例")
+             instance_to_term = None
+        else:
+            instance_to_term = st.selectbox(
+                f"选择要关闭的实例 (匹配: {len(filtered_term_instances)})", 
+                [d['Instance ID'] for d in filtered_term_instances], 
+                key="term_select",
+                format_func=lambda x: f"{x} - {next((d['Project'] for d in filtered_term_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_term_instances if d['Instance ID'] == x), '')})"
+            ) if filtered_term_instances else None
+        
+        if instance_to_term and st.button("🛑 关闭实例", type="primary"):
+            target = next((d for d in display_data if d['Instance ID'] == instance_to_term), None)
+            if target:
+                cred = cred_lookup.get(target['_cred_id'])
+                if cred:
+                        terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term)
+                        update_instance_status(instance_to_term, "shutting-down")
+                        # Clear cache
+                        if "display_data" in st.session_state:
+                            del st.session_state["display_data"]
+                        st.success("已关闭")
+                        time.sleep(1)
+                        st.rerun()
 
 # ====================
 # TAB 4: Billing Center
