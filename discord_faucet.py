@@ -1,4 +1,4 @@
-import requests
+from curl_cffi import requests
 import time
 import random
 import csv
@@ -6,31 +6,21 @@ import sys
 import os
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# curl_cffi handles user-agent and ja3 when impersonating
+# We just need to ensure we set the content type correctly
 
 # Configuration
 CHANNEL_ID = "1423751569454661632" # Shardeum Faucet Channel
-# Update: Fallback to Shardeum Faucet Channel ID if changed.
-# The user's screenshot shows 404 Unknown Channel, implying the channel ID might be wrong or the bot has no access.
-# However, the user provided ID 1016643264627916800.
-# Let's try to search in the guild if we can get the guild ID, or the user needs to provide a correct Channel ID.
-# For now, let's allow updating the CHANNEL_ID via environment variable or input file if needed, 
-# but mostly likely the channel ID is simply incorrect or the user is not in that server.
 
-# IMPORTANT: The error 404 Unknown Channel means the bot (user token) cannot see the channel.
-# This happens if:
-# 1. The user is not in the server.
-# 2. The channel ID is wrong.
-# 3. The user is banned from the channel/server.
-
-# Let's add a check to verify channel access.
+# ...
 
 def check_channel_access(token, channel_id, proxy=None):
     url = f"{DISCORD_API_BASE}/channels/{channel_id}"
-    headers = {"Authorization": token, "User-Agent": USER_AGENT}
+    headers = {"Authorization": token}
     proxies = get_proxy_dict(proxy)
     try:
-        r = requests.get(url, headers=headers, proxies=proxies)
+        # Use chrome120 impersonation
+        r = requests.get(url, headers=headers, proxies=proxies, impersonate="chrome120")
         if r.status_code == 200:
             print(f"[+] Channel Access OK: {r.json().get('name')}")
             return True
@@ -39,6 +29,129 @@ def check_channel_access(token, channel_id, proxy=None):
             return False
     except Exception as e:
         print(f"[-] Channel Check Error: {e}")
+        return False
+
+def get_command_metadata(token, channel_id, query="faucet"):
+    """
+    Auto-discover the application_id and command_id for the slash command.
+    This mimics the client searching for commands in the channel.
+    """
+    url = f"{DISCORD_API_BASE}/channels/{channel_id}/application-commands/search?type=1&query={query}&limit=7&include_applications=true"
+    headers = {
+        "Authorization": token
+    }
+    
+    try:
+        print(f"[*] Discovering slash command IDs for '/{query}'...")
+        # Note: This endpoint might require a valid user token and might be sensitive.
+        # If it fails, we might need fallback IDs or manual input.
+        r = requests.get(url, headers=headers, impersonate="chrome120")
+        if r.status_code == 200:
+            data = r.json()
+            commands = data.get('application_commands', [])
+            for cmd in commands:
+                if cmd['name'] == query:
+                    print(f"[+] Found Command: {cmd['name']} (ID: {cmd['id']}) App ID: {cmd['application_id']}")
+                    return {
+                        "application_id": cmd['application_id'],
+                        "command_id": cmd['id'],
+                        "version": cmd['version'],
+                        "name": cmd['name'],
+                        "options": cmd.get('options', [])
+                    }
+            print("[-] Command not found in search results.")
+        else:
+            print(f"[-] Discovery failed: {r.status_code} {r.text}")
+    except Exception as e:
+        print(f"[-] Discovery Error: {e}")
+    
+    return None
+
+def send_slash_command(token, proxy, meta, wallet_address):
+    """
+    Send the actual interaction payload.
+    """
+    url = f"{DISCORD_API_BASE}/interactions"
+    
+    # Construct the payload for /faucet address: <wallet>
+    # Usually structure:
+    # data: {
+    #   id: command_id,
+    #   name: "faucet",
+    #   type: 1,
+    #   options: [ { type: 3, name: "address", value: "0x..." } ]
+    # }
+    
+    payload = {
+        "type": 2, # Application Command
+        "application_id": meta['application_id'],
+        "guild_id": None, # DM or Guild? Assuming Guild if channel is in guild.
+        # We need guild_id if it's a guild channel.
+        # For Shardeum, it is a guild. We can try to fetch guild_id from channel or just omit if not strictly required (usually is).
+        # Actually, let's fetch channel details first if possible, or just try without guild_id (might fail).
+        # Better: User provided channel ID, we can assume it's a guild channel.
+        # Let's try to get guild_id from channel info first.
+        "channel_id": CHANNEL_ID,
+        "session_id": "0", # Can often be mocked or 0 for scripts
+        "data": {
+            "version": meta['version'],
+            "id": meta['command_id'],
+            "name": meta['name'],
+            "type": 1,
+            "options": [
+                {
+                    "type": 3, # String
+                    "name": "address",
+                    "value": wallet_address
+                }
+            ],
+            "application_command": {
+                "id": meta['command_id'],
+                "application_id": meta['application_id'],
+                "version": meta['version'],
+                "default_member_permissions": None,
+                "type": 1,
+                "nsfw": False,
+                "name": meta['name'],
+                "description": meta.get('description', 'Claim tokens'),
+                "dm_permission": True,
+                "options": meta['options']
+            }
+        },
+        "nonce": str(int(time.time() * 1000000))
+    }
+    
+    # Need to get Guild ID for the channel
+    # Hack: If we don't have guild_id, some bots reject.
+    # We can do a quick GET /channels/ID to find guild_id.
+    
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json"
+    }
+    
+    proxies = get_proxy_dict(proxy)
+    
+    try:
+        # Step 0: Get Guild ID (Lazy fetch)
+        r_chan = requests.get(f"{DISCORD_API_BASE}/channels/{CHANNEL_ID}", headers=headers, proxies=proxies, impersonate="chrome120")
+        if r_chan.status_code == 200:
+            guild_id = r_chan.json().get('guild_id')
+            if guild_id:
+                payload['guild_id'] = guild_id
+        
+        # Step 1: Send Interaction
+        r = requests.post(url, json=payload, headers=headers, proxies=proxies, impersonate="chrome120")
+        
+        if r.status_code == 204:
+            print(f"[+] Success: {wallet_address} (Proxy: {proxy.split('@')[-1] if proxy else 'Direct'})")
+            return True
+        else:
+            print(f"[-] Failed: {r.status_code} {r.text[:100]}")
+            return False
+
+    except Exception as e:
+        print(f"[-] Request Error: {e}")
         return False
 
 

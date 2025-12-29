@@ -1,12 +1,11 @@
-import requests
+from curl_cffi import requests
 import time
 import random
 import sys
 import os
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
-# Common user agent to look like a browser
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# curl_cffi will handle User-Agent and ja3 when impersonating chrome120
 
 # Context properties to mimic the Discord client
 # This helps avoid some basic bot detection
@@ -33,7 +32,6 @@ def join_guild(token, invite_code, proxy):
     
     headers = {
         "Authorization": token,
-        "User-Agent": USER_AGENT,
         "X-Super-Properties": X_SUPER_PROPERTIES,
         "Content-Type": "application/json"
     }
@@ -42,8 +40,8 @@ def join_guild(token, invite_code, proxy):
     
     try:
         # POST to /invites/<code> to join
-        # Sometimes an empty body {} is required, or specific context
-        r = requests.post(url, headers=headers, json={}, proxies=proxies)
+        # Use chrome120 impersonation
+        r = requests.post(url, headers=headers, json={}, proxies=proxies, impersonate="chrome120")
         
         if r.status_code == 200:
             guild_name = r.json().get('guild', {}).get('name', 'Unknown Guild')
