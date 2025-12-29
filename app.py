@@ -87,7 +87,7 @@ st.title("AWS DePIN Launcher (Pro)")
 st.markdown("多账号管理与一键部署平台。")
 
 # Tabs
-tab_creds, tab_deploy, tab_manage, tab_billing = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "💳 会员中心"])
+tab_creds, tab_deploy, tab_manage, tab_billing, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "💳 会员中心", "🛠️ 工具箱"])
 
 # Load existing config
 config = load_config()
@@ -808,3 +808,70 @@ with tab_billing:
     
     > ℹ️ 余额为 0 时将停止自动替补与深度检测服务。
     """)
+
+# ====================
+# TAB 5: Toolbox
+# ====================
+with tab_tools:
+    st.header("🛠️ 实用工具箱")
+    
+    st.subheader("批量生成钱包 (EVM)")
+    st.markdown("批量生成以太坊兼容 (EVM) 钱包地址，可用于 Shardeum 等项目。")
+    
+    with st.form("wallet_gen_form"):
+        gen_count = st.number_input("生成数量", min_value=1, max_value=1000, value=10, step=1)
+        submitted = st.form_submit_button("开始生成")
+        
+    if submitted:
+        try:
+            from eth_account import Account
+            # Enable features just in case, though create() is standard
+            Account.enable_unaudited_hdwallet_features()
+            
+            wallets = []
+            progress_bar = st.progress(0)
+            
+            for i in range(gen_count):
+                acct = Account.create()
+                wallets.append({
+                    "Address": acct.address,
+                    "Private Key": acct.key.hex()
+                })
+                progress_bar.progress((i + 1) / gen_count)
+                
+            df_wallets = pd.DataFrame(wallets)
+            
+            st.success(f"成功生成 {gen_count} 个钱包！")
+            
+            # Show preview
+            st.dataframe(df_wallets.head(10))
+            if gen_count > 10:
+                st.caption(f"仅显示前 10 个，共 {gen_count} 个。请下载完整文件。")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # CSV for Download (Full)
+                csv_full = df_wallets.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 下载完整列表 (含私钥)",
+                    data=csv_full,
+                    file_name=f'generated_wallets_{int(time.time())}.csv',
+                    mime='text/csv',
+                )
+            
+            with col2:
+                # CSV for Faucet Script (Address Only, No Header)
+                csv_simple = df_wallets['Address'].to_csv(index=False, header=False).encode('utf-8')
+                st.download_button(
+                    label="📥 下载地址列表 (适配领水脚本)",
+                    data=csv_simple,
+                    file_name='wallets.csv',
+                    mime='text/csv',
+                    help="仅包含地址列，无表头，可直接用于 discord_faucet.py"
+                )
+                
+        except ImportError:
+            st.error("缺少依赖库 `eth-account`。请联系管理员安装。")
+        except Exception as e:
+            st.error(f"生成失败: {str(e)}")
