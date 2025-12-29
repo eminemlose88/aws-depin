@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import os
 import pandas as pd
+import time
 from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status
@@ -425,3 +426,4 @@ with tab_manage:
                                         st.error(f"关闭失败: {res['msg']}")
                             else:
                                 st.error("无法找到该实例对应的凭证（可能已被删除）。")
+</toolcall_result>
