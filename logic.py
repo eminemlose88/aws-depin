@@ -12,6 +12,59 @@ AMI_MAPPING = {
     'ap-northeast-1': 'ami-012261b9035f8f938'
 }
 
+def ensure_security_group(ec2_client):
+    """
+    Ensure a security group 'DePIN-Launcher-SG' exists and allows SSH.
+    Returns the GroupId.
+    """
+    sg_name = 'DePIN-Launcher-SG'
+    try:
+        # Check if SG exists
+        response = ec2_client.describe_security_groups(GroupNames=[sg_name])
+        return response['SecurityGroups'][0]['GroupId']
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
+            # Create SG
+            try:
+                response = ec2_client.create_security_group(
+                    GroupName=sg_name,
+                    Description='Allow SSH and Project ports for DePIN Launcher'
+                )
+                sg_id = response['GroupId']
+                
+                # Add Inbound Rules
+                ec2_client.authorize_security_group_ingress(
+                    GroupId=sg_id,
+                    IpPermissions=[
+                        {
+                            'IpProtocol': 'tcp',
+                            'FromPort': 22,
+                            'ToPort': 22,
+                            'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                        },
+                        # Optional: Allow HTTP/HTTPS for some projects
+                        {
+                            'IpProtocol': 'tcp',
+                            'FromPort': 80,
+                            'ToPort': 80,
+                            'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                        },
+                         {
+                            'IpProtocol': 'tcp',
+                            'FromPort': 443,
+                            'ToPort': 443,
+                            'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                        }
+                    ]
+                )
+                return sg_id
+            except Exception as create_err:
+                print(f"Failed to create SG: {create_err}")
+                return None
+        else:
+            print(f"Error checking SG: {e}")
+            return None
+
 def launch_instance(ak, sk, region, user_data, project_name):
     """
     Launch an EC2 instance with a new unique key pair.
@@ -41,8 +94,13 @@ def launch_instance(ak, sk, region, user_data, project_name):
             private_key = key_pair['KeyMaterial']
         except ClientError as e:
             return {'status': 'error', 'msg': f"Failed to create Key Pair: {e}"}
+            
+        # 2. Ensure Security Group
+        sg_id = ensure_security_group(ec2)
+        if not sg_id:
+             return {'status': 'error', 'msg': "Failed to configure Security Group."}
 
-        # 2. Launch instance
+        # 3. Launch instance
         # t2.micro, auto-assign public IP, bind the new key pair
         response = ec2.run_instances(
             ImageId=ami_id,
@@ -50,10 +108,12 @@ def launch_instance(ak, sk, region, user_data, project_name):
             MinCount=1,
             MaxCount=1,
             KeyName=key_name, # Bind the key
+            SecurityGroupIds=[sg_id], # Bind the Security Group
             UserData=user_data,
             NetworkInterfaces=[{
                 'DeviceIndex': 0,
                 'AssociatePublicIpAddress': True,
+                'Groups': [sg_id] # Must specify groups here if using NetworkInterfaces
             }],
             TagSpecifications=[{
                 'ResourceType': 'instance',
