@@ -52,6 +52,9 @@ def log_instance(access_key_id, instance_id, ip, region, project_name, status="a
         print("Supabase credentials not found. Skipping DB logging.")
         return
 
+    # Clean AK: remove whitespace
+    access_key_id = access_key_id.strip() if access_key_id else ""
+
     try:
         data = {
             "access_key_id": access_key_id,
@@ -76,8 +79,8 @@ def get_user_instances(access_key_id):
     if not supabase:
         return []
 
-    # Perform a quick check before query (optional, or just handle exception)
-    # check_db_connection() # calling this here might be too intrusive UI-wise
+    # Clean AK: remove whitespace
+    access_key_id = access_key_id.strip() if access_key_id else ""
 
     try:
         response = supabase.table("instances") \
