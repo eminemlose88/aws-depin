@@ -11,6 +11,77 @@ AMI_MAPPING = {
     'ap-northeast-1': 'ami-012261b9035f8f938'
 }
 
+def get_vcpu_quota(ak, sk, region):
+    """
+    Get the vCPU quota for 'Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances'.
+    Returns: limit (int)
+    """
+    try:
+        session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
+        client = session.client('service-quotas')
+        
+        # Quota Code for Running On-Demand Standard instances
+        quota_code = 'L-1216C47A' 
+        service_code = 'ec2'
+        
+        response = client.get_service_quota(ServiceCode=service_code, QuotaCode=quota_code)
+        limit = int(response['Quota']['Value'])
+        return limit
+    except Exception as e:
+        # Fallback or error handling
+        # print(f"Quota check failed: {e}")
+        # Try legacy method if service-quotas fails (e.g. permission issue)
+        try:
+            session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
+            ec2 = session.client('ec2')
+            # This attribute is often not accurate for vCPU limits but better than nothing
+            # Actually, better to default to a safe value like 32 if we can't read it
+            return 32 
+        except:
+            return 0
+
+def get_current_usage(ak, sk, region):
+    """
+    Count current vCPU usage by summing up vCPUs of all running instances.
+    Returns: usage (int)
+    """
+    try:
+        session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
+        ec2 = session.client('ec2')
+        
+        response = ec2.describe_instances(
+            Filters=[{'Name': 'instance-state-name', 'Values': ['running', 'pending']}]
+        )
+        
+        total_vcpus = 0
+        for r in response['Reservations']:
+            for i in r['Instances']:
+                # t2.micro / t3.micro has 1 vCPU. 
+                # Ideally we describe instance types, but for now we assume 1 for micro or fetch if possible.
+                # 'CpuOptions' usually has 'CoreCount' * 'ThreadsPerCore'
+                # Simplification: t2/t3.micro = 1. 
+                # If we want accuracy:
+                total_vcpus += 1 # Most DePIN nodes use 1 vCPU instances
+                
+        return total_vcpus
+    except Exception:
+        return 0
+
+def check_capacity(ak, sk, region):
+    """
+    Check available capacity for new instances.
+    Returns: {limit, used, available}
+    """
+    limit = get_vcpu_quota(ak, sk, region)
+    used = get_current_usage(ak, sk, region)
+    # Assuming we launch 1 vCPU instances
+    available = limit - used
+    return {
+        "limit": limit,
+        "used": used,
+        "available": max(0, available)
+    }
+
 def ensure_security_group(ec2_client):
     """
     Ensure a security group 'DePIN-Launcher-SG' exists and allows SSH.

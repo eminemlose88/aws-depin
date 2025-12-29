@@ -3,7 +3,7 @@ import json
 import os
 import pandas as pd
 import time
-from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health
+from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health
 from auth import login_page, get_current_user, sign_out
@@ -51,8 +51,6 @@ if user:
         if current_profile:
             role = current_profile.get("role", "user")
             st.session_state["user_role"] = role
-            # Optional: Debug info (remove in production)
-            # st.sidebar.caption(f"Debug Role: {role}") 
     except Exception as e:
         print(f"Role refresh failed: {e}")
 
@@ -143,22 +141,36 @@ with tab_creds:
     with col_add:
         st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
     with col_check:
-        if st.button("🏥 一键体检", help="检查所有账号的可用状态"):
+        if st.button("🏥 一键体检 (含配额)", help="检查所有账号的状态及配额"):
             # Check balance first
             allowed, msg = check_balance(user.id)
             if not allowed:
                 st.error(msg)
             else:
-                with st.spinner("正在检查所有账号健康状态..."):
+                with st.spinner("正在检查所有账号健康状态与配额..."):
                     creds = get_user_credentials(user.id)
                     if not creds:
                         st.warning("无账号可检查")
                     else:
-                        for cred in creds:
+                        progress_bar = st.progress(0)
+                        for i, cred in enumerate(creds):
+                            # Basic Health Check
                             res = check_account_health(cred['access_key_id'], cred['secret_access_key'])
                             update_credential_status(cred['id'], res['status'])
+                            
+                            # Quota Check if active
+                            quota_msg = ""
+                            if res['status'] == 'active':
+                                cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region)
+                                quota_msg = f" | 配额: {cap['used']}/{cap['limit']}"
+                            
                             if res['status'] != 'active':
                                 st.toast(f"{cred['alias_name']}: {res['msg']}", icon="⚠️")
+                            else:
+                                st.toast(f"{cred['alias_name']}: 正常 {quota_msg}", icon="✅")
+                            
+                            progress_bar.progress((i + 1) / len(creds))
+                            
                         st.success("检查完成！")
                         time.sleep(1)
                         st.rerun()
@@ -265,8 +277,20 @@ with tab_deploy:
                     results = []
                     
                     for i, cred in enumerate(target_creds):
-                        status_area.text(f"正在启动: {cred['alias_name']}...")
+                        status_area.text(f"正在检查配额: {cred['alias_name']}...")
                         
+                        # Quota Check
+                        try:
+                            cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], region)
+                            if cap['available'] < 1:
+                                results.append(f"⚠️ {cred['alias_name']}: 跳过 - 配额不足 (已用 {cap['used']}/{cap['limit']})")
+                                progress_bar.progress((i + 1) / len(target_creds))
+                                continue
+                        except Exception as e:
+                            results.append(f"⚠️ {cred['alias_name']}: 配额检查失败 - {e}")
+                            # Optionally continue or skip? Continue but risky. Let's try to launch.
+                        
+                        status_area.text(f"正在启动: {cred['alias_name']}...")
                         try:
                             result = launch_base_instance(
                                 cred['access_key_id'],
