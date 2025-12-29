@@ -106,7 +106,13 @@ def ensure_security_group(ec2_client):
                     IpPermissions=[
                         {'IpProtocol': 'tcp', 'FromPort': 22, 'ToPort': 22, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
                         {'IpProtocol': 'tcp', 'FromPort': 80, 'ToPort': 80, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
-                        {'IpProtocol': 'tcp', 'FromPort': 443, 'ToPort': 443, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]}
+                        {'IpProtocol': 'tcp', 'FromPort': 443, 'ToPort': 443, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+                        # Shardeum Ports
+                        {'IpProtocol': 'tcp', 'FromPort': 8080, 'ToPort': 8080, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+                        {'IpProtocol': 'tcp', 'FromPort': 9001, 'ToPort': 9001, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+                        {'IpProtocol': 'tcp', 'FromPort': 10001, 'ToPort': 10001, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+                        # Babylon Ports
+                        {'IpProtocol': 'tcp', 'FromPort': 26656, 'ToPort': 26657, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]}
                     ]
                 )
                 return sg_id

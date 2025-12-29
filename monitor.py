@@ -34,7 +34,19 @@ def check_instance_process(ip, private_key_str, project_name):
         # We look for the container name associated with the project
         # Simple mapping for now based on templates.py
         target_container = ""
-        if "Titan" in project_name:
+        if "Shardeum" in project_name:
+             target_container = "shardeum-dashboard"
+        elif "Babylon" in project_name:
+             # Babylon runs as a systemd service, so we check the process or service
+             stdin, stdout, stderr = client.exec_command("systemctl is-active babylond")
+             output = stdout.read().decode().strip()
+             if output == "active":
+                 client.close()
+                 return True, "Service 'babylond' is active"
+             else:
+                 client.close()
+                 return False, f"Service 'babylond' is {output}"
+        elif "Titan" in project_name:
             target_container = "titan-edge"
         elif "Meson" in project_name:
             # Meson runs as a service usually, check process
@@ -92,13 +104,25 @@ def detect_installed_project(ip, private_key_str):
     try:
         client.connect(hostname=ip, username='ec2-user', pkey=pkey, timeout=10)
         
-        # 1. Check for Titan Network (Docker container 'titan-edge')
+        # 1. Check for Shardeum (Dashboard Container)
+        stdin, stdout, stderr = client.exec_command("sudo docker ps --format '{{.Names}}' | grep shardeum-dashboard")
+        if stdout.read().decode().strip():
+            client.close()
+            return "Shardeum_Titan_Combo", "Shardeum Dashboard found"
+
+        # 2. Check for Babylon (System Service)
+        stdin, stdout, stderr = client.exec_command("systemctl is-active babylond")
+        if stdout.read().decode().strip() == "active":
+             client.close()
+             return "Babylon_Traffmonetizer_Combo", "Babylon Service active"
+
+        # 3. Check for Titan Network (Docker container 'titan-edge')
         stdin, stdout, stderr = client.exec_command("sudo docker ps --format '{{.Names}}' | grep titan-edge")
         if stdout.read().decode().strip():
             client.close()
             return "Titan Network", "Titan container running"
             
-        # 2. Check for Meson / GagaNode (Process 'gaganode')
+        # 4. Check for Meson / GagaNode (Process 'gaganode')
         stdin, stdout, stderr = client.exec_command("pgrep -f gaganode")
         if stdout.read().decode().strip():
             client.close()

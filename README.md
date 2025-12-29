@@ -10,8 +10,11 @@
 *   **多项目支持**:
     *   **Titan Network**: 基于 Docker 容器化部署。
     *   **Meson (GagaNode)**: 基于二进制文件部署。
+    *   **Shardeum + Titan (Combo)**: 适合 16GB+ 内存机型，同时运行 Shardeum 验证节点与 Titan（流量掩护）。
+    *   **Babylon + Traffmonetizer (Combo)**: 适合存储型节点，同时运行 Babylon 验证节点与 Traffmonetizer（流量掩护）。
 *   **自动化运维**:
     *   自动匹配 Amazon Linux 2023 AMI。
+    *   自动配置安全组（自动开放 8080, 9001, 10001, 26656 等必要端口）。
     *   自动生成 UserData 启动脚本。
     *   自动分配公网 IP 并打上项目标签 (`Project`, `Name`)。
 *   **动态 UI**: 基于 Streamlit，根据所选项目自动渲染所需的参数输入框。
@@ -76,9 +79,12 @@ streamlit run app.py
 
 ### 部署节点 (Deploy Tab)
 1.  **侧边栏配置**: 选择 AWS Region 和 Project。
-2.  **填写参数**: 输入项目所需参数（如 `identity_code`）。
-3.  **输入凭证**: 输入 AWS AK/SK。
-4.  **立即部署**: 点击按钮，等待几分钟即可上线。
+    *   *推荐尝试新的 Combo 组合拳模板以最大化收益。*
+2.  **启动基础实例**: 点击“批量启动实例”，系统将自动配置安全组并启动纯净的 Amazon Linux 环境。
+3.  **批量安装项目**: 切换到 **“实例监控”** 页面，在底部选择 **“批量项目安装”**，选择刚刚启动的实例，一键下发安装指令。
+    *   **Shardeum**: 安装后访问 `https://<IP>:8080` (密码为部署时设置的密码) 进行质押。
+    *   **Babylon**: 安装后会自动作为 Systemd 服务运行。
+4.  **输入凭证**: 在“凭证管理”页面批量导入或添加 AWS AK/SK。
 
 ### 管理实例 (Manage Tab)
 1.  切换到 **⚙️ 管理实例** 选项卡。
