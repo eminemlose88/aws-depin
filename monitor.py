@@ -65,9 +65,16 @@ def check_instance_process(ip, private_key_str, project_name):
             if output == "active":
                 client.close()
                 return True, "Service 'sockd' is active"
-            else:
+            
+            # Check squid service (if it's Squid Proxy)
+            stdin, stdout, stderr = client.exec_command("systemctl is-active squid")
+            output_squid = stdout.read().decode().strip()
+            if output_squid == "active":
                 client.close()
-                return False, f"Service 'sockd' is {output}"
+                return True, "Service 'squid' is active"
+                
+            client.close()
+            return False, f"Proxy Service not active (sockd: {output}, squid: {output_squid})"
         else:
             # Default generic check: just check if docker is alive
             target_container = "docker" 
@@ -143,6 +150,12 @@ def detect_installed_project(ip, private_key_str):
         if stdout.read().decode().strip() == "active":
              client.close()
              return "Dante_Socks5_Proxy", "Dante Proxy active"
+
+        # 6. Check for Squid HTTP Proxy (Service 'squid')
+        stdin, stdout, stderr = client.exec_command("systemctl is-active squid")
+        if stdout.read().decode().strip() == "active":
+             client.close()
+             return "Squid_HTTP_Proxy", "Squid Proxy active"
             
         client.close()
         return None, "No known project detected"

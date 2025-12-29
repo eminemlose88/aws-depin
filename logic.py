@@ -114,7 +114,9 @@ def ensure_security_group(ec2_client):
                         # Babylon Ports
                         {'IpProtocol': 'tcp', 'FromPort': 26656, 'ToPort': 26657, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
                         # SOCKS5 Proxy
-                        {'IpProtocol': 'tcp', 'FromPort': 1080, 'ToPort': 1080, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]}
+                        {'IpProtocol': 'tcp', 'FromPort': 1080, 'ToPort': 1080, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+                        # Squid HTTP Proxy
+                        {'IpProtocol': 'tcp', 'FromPort': 3128, 'ToPort': 3128, 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]}
                     ]
                 )
                 return sg_id

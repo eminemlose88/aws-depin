@@ -150,7 +150,7 @@ systemctl start babylond
         "description": "Standard SOCKS5 Proxy Server (Dante)",
         "params": ["proxy_user", "proxy_password", "proxy_port"],
         "script_template": """#!/bin/bash
-# Install Dante Server
+# ... (Existing Dante Template) ...
 yum install -y http://mirror.ghettoforge.org/distributions/gf/gf-release-latest.gf.el7.noarch.rpm
 yum install -y dante-server
 
@@ -197,6 +197,46 @@ firewall-cmd --reload
 # Start Service
 systemctl enable sockd
 systemctl start sockd
+"""
+    },
+    "Squid_HTTP_Proxy": {
+        "description": "Authenticated HTTP Proxy (Squid)",
+        "params": ["proxy_user", "proxy_password"],
+        "script_template": """#!/bin/bash
+# Install Squid and htpasswd tool
+yum update -y
+yum install -y squid httpd-tools
+
+# Create Password File
+htpasswd -b -c /etc/squid/passwd {proxy_user} {proxy_password}
+
+# Configure Squid
+mv /etc/squid/squid.conf /etc/squid/squid.conf.bak
+
+cat <<EOF > /etc/squid/squid.conf
+# Auth Configuration
+auth_param basic program /usr/lib64/squid/basic_ncsa_auth /etc/squid/passwd
+auth_param basic children 5
+auth_param basic realm Squid Basic Authentication
+auth_param basic credentialsttl 2 hours
+acl auth_users proxy_auth REQUIRED
+
+# Access Control
+http_access allow auth_users
+http_access deny all
+
+# Port
+http_port 3128
+
+# Hide headers for anonymity
+forwarded_for off
+request_header_access Via deny all
+request_header_access X-Forwarded-For deny all
+EOF
+
+# Start Service
+systemctl enable squid
+systemctl start squid
 """
     }
 }
