@@ -10,6 +10,9 @@ from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh
 from billing import check_balance, get_user_profile, add_balance, process_daily_billing, calculate_daily_cost
 
+# Import Admin Dashboard
+from admin import admin_dashboard
+
 # Set page configuration
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
 
@@ -41,6 +44,11 @@ if not user:
     login_page()
     st.stop()
 
+# --- Admin Mode Router ---
+if "admin_mode" in st.session_state and st.session_state["admin_mode"]:
+    admin_dashboard()
+    st.stop() # Stop rendering the rest of the app
+
 # --- Main App (Authenticated) ---
 
 st.sidebar.markdown(f"👤 **{user.email}**")
@@ -53,6 +61,14 @@ st.sidebar.markdown(f"💰 **余额: ${balance:.2f}**")
 if balance <= 0:
     st.sidebar.error("⚠️ 余额不足，服务受限")
 
+# Admin Entry Button
+if "user_role" in st.session_state and st.session_state["user_role"] == 'admin':
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🛡️ 进入管理员后台", type="primary"):
+        st.session_state["admin_mode"] = True
+        st.rerun()
+
+st.sidebar.markdown("---")
 if st.sidebar.button("登出"):
     sign_out()
     st.rerun()

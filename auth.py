@@ -34,7 +34,19 @@ def sign_in(email, password):
         # If successful, store the authenticated client in session state
         if response.user:
             st.session_state["supabase_client"] = client
+            st.session_state["user"] = response.user
             
+            # Fetch User Role
+            try:
+                profile = client.table("profiles").select("role").eq("id", response.user.id).single().execute()
+                if profile.data:
+                    st.session_state["user_role"] = profile.data.get("role", "user")
+                else:
+                    st.session_state["user_role"] = "user"
+            except Exception as e:
+                print(f"Error fetching role: {e}")
+                st.session_state["user_role"] = "user"
+
         return response
     except Exception as e:
         return {"error": str(e)}
@@ -46,8 +58,10 @@ def sign_out():
             st.session_state["supabase_client"].auth.sign_out()
             del st.session_state["supabase_client"]
         
-        if "user" in st.session_state:
-            del st.session_state["user"]
+        keys_to_clear = ["user", "user_role", "admin_mode"]
+        for k in keys_to_clear:
+            if k in st.session_state:
+                del st.session_state[k]
             
     except Exception as e:
         print(f"Sign out error: {e}")
@@ -56,6 +70,15 @@ def get_current_user():
     """Get the currently logged-in user from the session."""
     # First check if we have a user object in session
     if "user" in st.session_state:
+        # Ensure role is loaded if missing (e.g. page refresh)
+        if "user_role" not in st.session_state and "supabase_client" in st.session_state:
+             try:
+                client = st.session_state["supabase_client"]
+                profile = client.table("profiles").select("role").eq("id", st.session_state["user"].id).single().execute()
+                if profile.data:
+                    st.session_state["user_role"] = profile.data.get("role", "user")
+             except:
+                 pass
         return st.session_state["user"]
         
     # If not, check if we have a client and try to fetch user
@@ -64,6 +87,14 @@ def get_current_user():
             user_response = st.session_state["supabase_client"].auth.get_user()
             if user_response and user_response.user:
                 st.session_state["user"] = user_response.user
+                
+                # Fetch role
+                try:
+                    profile = st.session_state["supabase_client"].table("profiles").select("role").eq("id", user_response.user.id).single().execute()
+                    st.session_state["user_role"] = profile.data.get("role", "user") if profile.data else "user"
+                except:
+                    st.session_state["user_role"] = "user"
+
                 return user_response.user
         except Exception:
             pass
@@ -89,7 +120,7 @@ def login_page():
                         st.error(f"登录失败: {res['error']}")
                     else:
                         st.success("登录成功！")
-                        st.session_state["user"] = res.user
+                        # User and role set in sign_in
                         st.rerun()
 
     with tab2:
@@ -107,5 +138,4 @@ def login_page():
                         st.error(f"注册失败: {res['error']}")
                     else:
                         st.success("注册成功！请检查邮箱并确认验证链接（如果已启用邮箱验证），然后登录。")
-                        # For some Supabase configs, auto-login happens, for others email confirm is needed.
-                        # We'll ask user to login.
+                        # Ensure profile is created (trigger handles it, but double check logic if needed)
