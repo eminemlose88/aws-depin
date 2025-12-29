@@ -1,9 +1,18 @@
 import os
+import streamlit as st
 from supabase import create_client, Client
 
 # Initialize Supabase client
+# Try to get credentials from environment variables first, then from streamlit secrets
 url: str = os.environ.get("SUPABASE_URL")
 key: str = os.environ.get("SUPABASE_KEY")
+
+if not url and hasattr(st, "secrets") and "secrets" in st.secrets:
+    url = st.secrets["secrets"].get("SUPABASE_URL")
+    key = st.secrets["secrets"].get("SUPABASE_KEY")
+elif not url and hasattr(st, "secrets"): # Handle flat secrets structure
+    url = st.secrets.get("SUPABASE_URL")
+    key = st.secrets.get("SUPABASE_KEY")
 
 supabase: Client = None
 if url and key:
