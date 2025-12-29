@@ -1,5 +1,6 @@
 import boto3
 import time
+import datetime
 from botocore.exceptions import ClientError
 
 # Amazon Linux 2023 AMI IDs (x86_64)
@@ -13,7 +14,8 @@ AMI_MAPPING = {
 
 def launch_instance(ak, sk, region, user_data, project_name):
     """
-    Launch an EC2 instance and return status.
+    Launch an EC2 instance with a new unique key pair.
+    Returns status, instance info, and the PRIVATE KEY content.
     """
     if region not in AMI_MAPPING:
         return {'status': 'error', 'msg': f'Region {region} not supported or AMI not defined.'}
@@ -29,13 +31,25 @@ def launch_instance(ak, sk, region, user_data, project_name):
         )
         ec2 = session.client('ec2')
 
-        # Launch instance
-        # t2.micro, auto-assign public IP, no key pair
+        # 1. Create Key Pair
+        # Unique name based on project and timestamp
+        timestamp = int(time.time())
+        key_name = f"depin-key-{project_name}-{timestamp}"
+        
+        try:
+            key_pair = ec2.create_key_pair(KeyName=key_name)
+            private_key = key_pair['KeyMaterial']
+        except ClientError as e:
+            return {'status': 'error', 'msg': f"Failed to create Key Pair: {e}"}
+
+        # 2. Launch instance
+        # t2.micro, auto-assign public IP, bind the new key pair
         response = ec2.run_instances(
             ImageId=ami_id,
             InstanceType='t2.micro',
             MinCount=1,
             MaxCount=1,
+            KeyName=key_name, # Bind the key
             UserData=user_data,
             NetworkInterfaces=[{
                 'DeviceIndex': 0,
@@ -66,7 +80,8 @@ def launch_instance(ak, sk, region, user_data, project_name):
             'status': 'success',
             'ip': public_ip,
             'id': instance_id,
-            'msg': 'Instance launched successfully.'
+            'msg': 'Instance launched successfully.',
+            'private_key': private_key # Return the private key for storage
         }
 
     except Exception as e:

@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS instances (
     region TEXT NOT NULL,
     project_name TEXT NOT NULL,
     status TEXT DEFAULT 'active',
+    private_key TEXT, -- 加密存储的 SSH 私钥
+    health_status TEXT, -- 深度健康检查状态: Healthy, Missing Container, SSH Error 等
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 

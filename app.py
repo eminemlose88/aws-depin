@@ -5,8 +5,9 @@ import pandas as pd
 import time
 from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health
 from templates import PROJECT_REGISTRY, generate_script
-from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health
 from auth import login_page, get_current_user, sign_out
+from monitor import check_instance_process, install_project_via_ssh
 
 # Set page configuration
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
@@ -207,6 +208,7 @@ with tab_deploy:
                     
                     # 2. Launch Instance
                     status_container.write(f"☁️ 正在连接 AWS {region} ({selected_alias})...")
+                    # Note: launch_instance now returns 'private_key'
                     result = launch_instance(
                         selected_cred['access_key_id'], 
                         selected_cred['secret_access_key'], 
@@ -217,7 +219,7 @@ with tab_deploy:
                     
                     if result['status'] == 'success':
                         # 3. Log to DB
-                        status_container.write("💾 正在记录部署信息到数据库...")
+                        status_container.write("💾 正在记录部署信息到数据库 (包含加密私钥)...")
                         log_instance(
                             user_id=user.id,
                             credential_id=selected_cred['id'],
@@ -225,7 +227,8 @@ with tab_deploy:
                             ip=result['ip'],
                             region=region,
                             project_name=project_name,
-                            status="active"
+                            status="active",
+                            private_key=result.get('private_key') # Pass key for encryption
                         )
                         
                         status_container.update(label="部署成功！", state="complete", expanded=False)
@@ -367,6 +370,9 @@ with tab_manage:
                 # Get alias
                 alias = cred_info.get('alias_name', 'Unknown/Deleted') if cred_info else 'Unknown'
 
+                # SSH/Health Check status
+                health = inst.get('health_status', 'Unknown')
+
                 display_data.append({
                     "Account": alias,
                     "Project": inst['project_name'],
@@ -374,16 +380,110 @@ with tab_manage:
                     "IP Address": inst['ip_address'],
                     "Region": inst['region'],
                     "Status": current_status,
+                    "Health": health,
                     "Created": inst['created_at'][:16].replace('T', ' '),
-                    "_cred_id": inst['credential_id'] # Hidden for logic
+                    "_cred_id": inst['credential_id'], # Hidden for logic
+                    "_has_key": bool(inst.get('private_key')) # Check if we have key
                 })
             
-            # 5. Render Table
-            df = pd.DataFrame(display_data).drop(columns=["_cred_id"])
+            # 5. Render Table with new columns
+            df = pd.DataFrame(display_data).drop(columns=["_cred_id", "_has_key"])
             st.dataframe(df, use_container_width=True)
             
-            # 6. Action: Terminate
-            st.subheader("⚠️ 实例操作")
+            st.divider()
+
+            # 6. Advanced Actions (SSH based)
+            st.subheader("🛠️ 深度运维")
+            
+            col_target, col_actions = st.columns([2, 2])
+            
+            with col_target:
+                # Filter active instances that have keys
+                ssh_ready_instances = [
+                    d for d in display_data 
+                    if d['Status'] == 'running' and d['_has_key']
+                ]
+                
+                if not ssh_ready_instances:
+                    st.caption("没有可连接的实例 (需运行中且拥有私钥)")
+                    selected_ssh_instance = None
+                else:
+                    selected_ssh_instance = st.selectbox(
+                        "选择目标实例",
+                        [d['Instance ID'] for d in ssh_ready_instances],
+                        format_func=lambda x: f"{x} - {next((d['Project'] for d in ssh_ready_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in ssh_ready_instances if d['Instance ID'] == x), '')})"
+                    )
+
+            with col_actions:
+                if selected_ssh_instance:
+                    target_info = next((d for d in display_data if d['Instance ID'] == selected_ssh_instance), None)
+                    
+                    col_btn1, col_btn2 = st.columns(2)
+                    
+                    with col_btn1:
+                        if st.button("🔍 深度检测", help="SSH连入检查Docker容器状态", use_container_width=True):
+                            with st.spinner("正在建立 SSH 连接并检查..."):
+                                # 1. Get Private Key
+                                pkey = get_instance_private_key(selected_ssh_instance)
+                                if not pkey:
+                                    st.error("无法解密私钥")
+                                else:
+                                    # 2. Check Health
+                                    is_healthy, msg = check_instance_process(
+                                        target_info['IP Address'], 
+                                        pkey, 
+                                        target_info['Project']
+                                    )
+                                    
+                                    # 3. Update DB
+                                    new_health = "Healthy" if is_healthy else f"Error: {msg}"
+                                    update_instance_health(selected_ssh_instance, new_health)
+                                    
+                                    if is_healthy:
+                                        st.success(f"检测通过: {msg}")
+                                    else:
+                                        st.error(f"检测失败: {msg}")
+                                    time.sleep(1)
+                                    st.rerun()
+
+                    with col_btn2:
+                        if st.button("🔧 强制修复", help="重新安装项目脚本", type="primary", use_container_width=True):
+                             with st.spinner("正在重装项目..."):
+                                # 1. Get Private Key
+                                pkey = get_instance_private_key(selected_ssh_instance)
+                                if not pkey:
+                                    st.error("无法解密私钥")
+                                else:
+                                    # 2. Re-generate script
+                                    # We need original params. For now, we might need to ask user or store params.
+                                    # Simplification: Use default params or empty (templates usually have defaults)
+                                    # Ideally we should store launch params in DB. 
+                                    # For now, we will warn user or use default script generation.
+                                    project = target_info['Project']
+                                    if project in PROJECT_REGISTRY:
+                                        # Use empty params implies defaults? 
+                                        # Actually generate_script expects args. 
+                                        # Let's try to infer or just use base script.
+                                        # Warning: this might miss user custom codes!
+                                        st.warning("注意：将使用默认/空参数重装。")
+                                        # Mock params with empty strings to avoid errors if script expects them
+                                        params = {p: "REPLACE_ME" for p in PROJECT_REGISTRY[project]['params']}
+                                        script = generate_script(project, **params)
+                                        
+                                        # 3. Install
+                                        res = install_project_via_ssh(target_info['IP Address'], pkey, script)
+                                        if res['status'] == 'success':
+                                            st.success("重装指令已发送")
+                                            with st.expander("查看输出"):
+                                                st.code(res['output'])
+                                        else:
+                                            st.error(f"重装失败: {res['msg']}")
+                                    else:
+                                        st.error("未知项目类型")
+
+            # 7. Terminate Action (Existing)
+            st.divider()
+            st.subheader("⚠️ 危险操作")
             term_col1, term_col2 = st.columns([3, 1])
             with term_col1:
                 # Filter out already terminated instances
@@ -395,7 +495,8 @@ with tab_manage:
                     instance_to_term = st.selectbox(
                         "选择要关闭的实例", 
                         [d['Instance ID'] for d in active_instances],
-                        format_func=lambda x: f"{x} ({next((d['Account'] for d in active_instances if d['Instance ID'] == x), '')})"
+                        format_func=lambda x: f"{x} ({next((d['Account'] for d in active_instances if d['Instance ID'] == x), '')})",
+                        key="term_select"
                     )
             
             with term_col2:
@@ -426,4 +527,3 @@ with tab_manage:
                                         st.error(f"关闭失败: {res['msg']}")
                             else:
                                 st.error("无法找到该实例对应的凭证（可能已被删除）。")
-

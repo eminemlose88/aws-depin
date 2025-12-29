@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
+from crypto import encrypt_key, decrypt_key
 
 # Initialize Supabase client
 # Try to get credentials from environment variables first, then from streamlit secrets
@@ -106,13 +107,16 @@ def update_credential_status(cred_id, status):
 
 # --- Instance Management ---
 
-def log_instance(user_id, credential_id, instance_id, ip, region, project_name, status="active"):
+def log_instance(user_id, credential_id, instance_id, ip, region, project_name, status="active", private_key=None):
     """
     Log instance details to Supabase 'instances' table with user_id association.
+    Encodes private key if provided.
     """
     if not supabase:
         print("Supabase credentials not found. Skipping DB logging.")
         return
+
+    encrypted_key = encrypt_key(private_key) if private_key else None
 
     try:
         data = {
@@ -122,7 +126,8 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
             "ip_address": ip,
             "region": region,
             "project_name": project_name,
-            "status": status
+            "status": status,
+            "private_key": encrypted_key
         }
         supabase.table("instances").insert(data).execute()
         print(f"Logged instance {instance_id} to database.")
@@ -151,6 +156,22 @@ def get_user_instances(user_id):
         check_db_connection()
         return []
 
+def get_instance_private_key(instance_id):
+    """Retrieve and decrypt the private key for a specific instance."""
+    if not supabase: return None
+    try:
+        response = supabase.table("instances") \
+            .select("private_key") \
+            .eq("instance_id", instance_id) \
+            .single() \
+            .execute()
+        if response.data and response.data.get("private_key"):
+            return decrypt_key(response.data["private_key"])
+        return None
+    except Exception as e:
+        print(f"Error fetching private key: {e}")
+        return None
+
 def update_instance_status(instance_id, new_status):
     """
     Update the status of an instance in the database.
@@ -166,6 +187,17 @@ def update_instance_status(instance_id, new_status):
         print(f"Updated instance {instance_id} status to {new_status}")
     except Exception as e:
         print(f"Error updating instance status: {e}")
+
+def update_instance_health(instance_id, health_status):
+    """Update the health check status of an instance."""
+    if not supabase: return
+    try:
+        supabase.table("instances") \
+            .update({"health_status": health_status}) \
+            .eq("instance_id", instance_id) \
+            .execute()
+    except Exception as e:
+        print(f"Error updating instance health: {e}")
 
 def sync_instances(user_id, credential_id, region, aws_instances):
     """
