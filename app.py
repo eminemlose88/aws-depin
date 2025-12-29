@@ -501,11 +501,11 @@ with tab_manage:
         st.divider()
 
         # --- Advanced Actions & Installation ---
-            st.subheader("🛠️ 深度运维 & 项目安装")
-            
-            col_target, col_actions = st.columns([2, 2])
-            
-            with col_target:
+        st.subheader("🛠️ 深度运维 & 项目安装")
+        
+        col_target, col_actions = st.columns([2, 2])
+        
+        with col_target:
                 ssh_ready_instances = [d for d in display_data if d['Status'] == 'running' and d['_has_key']]
                 if not ssh_ready_instances:
                     st.caption("没有可操作的实例")
@@ -530,7 +530,7 @@ with tab_manage:
                             format_func=lambda x: f"{x} - {next((d['Project'] for d in filtered_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_instances if d['Instance ID'] == x), '')})"
                         )
 
-            with col_actions:
+        with col_actions:
                 if selected_ssh_instance:
                     target_info = next((d for d in display_data if d['Instance ID'] == selected_ssh_instance), None)
                     
@@ -564,12 +564,12 @@ with tab_manage:
                                             res = install_project_via_ssh(target_info['IP Address'], pkey, script)
                                             
                                             if res['status'] == 'success':
-                                            update_instance_project(selected_ssh_instance, target_proj)
-                                            # Clear cache
-                                            if "display_data" in st.session_state:
-                                                del st.session_state["display_data"]
-                                            st.success(f"安装指令已发送！")
-                                            st.info("请稍后刷新查看状态。")
+                                                update_instance_project(selected_ssh_instance, target_proj)
+                                                # Clear cache
+                                                if "display_data" in st.session_state:
+                                                    del st.session_state["display_data"]
+                                                st.success(f"安装指令已发送！")
+                                                st.info("请稍后刷新查看状态。")
                                                 with st.expander("查看输出"):
                                                     st.code(res['output'])
                                             else:
@@ -669,9 +669,9 @@ with tab_manage:
                             if "display_data" in st.session_state:
                                 del st.session_state["display_data"]
                             st.success("批量安装指令发送完成！")
-                                with st.expander("查看详细结果", expanded=True):
-                                    for r in results:
-                                        st.write(r)
+                            with st.expander("查看详细结果", expanded=True):
+                                for r in results:
+                                    st.write(r)
 
             # Terminate (No balance check needed for cleanup?)
             st.divider()
