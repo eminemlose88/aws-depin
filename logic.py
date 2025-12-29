@@ -2,6 +2,7 @@ import boto3
 import time
 import datetime
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 # Amazon Linux 2023 AMI IDs (x86_64)
 AMI_MAPPING = {
@@ -11,14 +12,15 @@ AMI_MAPPING = {
     'ap-northeast-1': 'ami-012261b9035f8f938'
 }
 
-def get_vcpu_quota(ak, sk, region):
+def get_vcpu_quota(ak, sk, region, proxy_url=None):
     """
     Get the vCPU quota for 'Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances'.
     Returns: limit (int)
     """
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
-        client = session.client('service-quotas')
+        client = session.client('service-quotas', config=config)
         
         # Quota Code for Running On-Demand Standard instances
         quota_code = 'L-1216C47A' 
@@ -33,21 +35,22 @@ def get_vcpu_quota(ak, sk, region):
         # Try legacy method if service-quotas fails (e.g. permission issue)
         try:
             session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
-            ec2 = session.client('ec2')
+            ec2 = session.client('ec2', config=config)
             # This attribute is often not accurate for vCPU limits but better than nothing
             # Actually, better to default to a safe value like 32 if we can't read it
             return 32 
         except:
             return 0
 
-def get_current_usage(ak, sk, region):
+def get_current_usage(ak, sk, region, proxy_url=None):
     """
     Count current vCPU usage by summing up vCPUs of all running instances.
     Returns: usage (int)
     """
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
-        ec2 = session.client('ec2')
+        ec2 = session.client('ec2', config=config)
         
         response = ec2.describe_instances(
             Filters=[{'Name': 'instance-state-name', 'Values': ['running', 'pending']}]
@@ -67,13 +70,13 @@ def get_current_usage(ak, sk, region):
     except Exception:
         return 0
 
-def check_capacity(ak, sk, region):
+def check_capacity(ak, sk, region, proxy_url=None):
     """
     Check available capacity for new instances.
     Returns: {limit, used, available}
     """
-    limit = get_vcpu_quota(ak, sk, region)
-    used = get_current_usage(ak, sk, region)
+    limit = get_vcpu_quota(ak, sk, region, proxy_url)
+    used = get_current_usage(ak, sk, region, proxy_url)
     # Assuming we launch 1 vCPU instances
     available = limit - used
     return {
@@ -112,7 +115,7 @@ def ensure_security_group(ec2_client):
                 return None
         return None
 
-def launch_base_instance(ak, sk, region):
+def launch_base_instance(ak, sk, region, proxy_url=None):
     """
     Step 1: Launch a base EC2 instance (Pure OS).
     Returns: {status, ip, id, private_key, msg}
@@ -121,10 +124,11 @@ def launch_base_instance(ak, sk, region):
         return {'status': 'error', 'msg': f'Region {region} not supported.'}
 
     ami_id = AMI_MAPPING[region]
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
 
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
-        ec2 = session.client('ec2')
+        ec2 = session.client('ec2', config=config)
 
         # 1. Create Key Pair
         timestamp = int(time.time())
@@ -194,12 +198,13 @@ systemctl enable docker
         return {'status': 'error', 'msg': str(e)}
 
 # Re-export other functions for compatibility
-def get_instance_status(ak, sk, region, instance_ids):
+def get_instance_status(ak, sk, region, instance_ids, proxy_url=None):
     """Get status."""
     if not instance_ids: return {}
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
-        ec2 = session.client('ec2')
+        ec2 = session.client('ec2', config=config)
         response = ec2.describe_instances(InstanceIds=instance_ids)
         status_map = {}
         for r in response['Reservations']:
@@ -209,11 +214,12 @@ def get_instance_status(ak, sk, region, instance_ids):
     except Exception as e:
         return {}
 
-def scan_all_instances(ak, sk, region):
+def scan_all_instances(ak, sk, region, proxy_url=None):
     """Scan all instances."""
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
-        ec2 = session.client('ec2')
+        ec2 = session.client('ec2', config=config)
         response = ec2.describe_instances()
         instances = []
         for r in response['Reservations']:
@@ -235,21 +241,23 @@ def scan_all_instances(ak, sk, region):
     except Exception:
         return []
 
-def terminate_instance(ak, sk, region, instance_id):
+def terminate_instance(ak, sk, region, instance_id, proxy_url=None):
     """Terminate instance."""
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
-        ec2 = session.client('ec2')
+        ec2 = session.client('ec2', config=config)
         ec2.terminate_instances(InstanceIds=[instance_id])
         return {'status': 'success', 'msg': 'Terminating...'}
     except Exception as e:
         return {'status': 'error', 'msg': str(e)}
 
-def check_account_health(ak, sk):
+def check_account_health(ak, sk, proxy_url=None):
     """Health check."""
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name='us-east-1')
-        ec2 = session.client('ec2')
+        ec2 = session.client('ec2', config=config)
         ec2.describe_regions(DryRun=False)
         return {'status': 'active', 'msg': 'Normal'}
     except ClientError as e:
@@ -262,6 +270,6 @@ def check_account_health(ak, sk):
         return {'status': 'error', 'msg': str(e)}
 
 # --- Deprecated but kept for compatibility if needed ---
-def launch_instance(ak, sk, region, user_data, project_name):
+def launch_instance(ak, sk, region, user_data, project_name, proxy_url=None):
     """Wrapper for backward compatibility or direct launch."""
-    return launch_base_instance(ak, sk, region)
+    return launch_base_instance(ak, sk, region, proxy_url)

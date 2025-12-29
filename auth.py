@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 # Note: We do NOT import the global 'supabase' object anymore for auth.
 # We create a new client for each session to prevent session leakage.
 
-@st.cache_resource(experimental_allow_widgets=True)
+@st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
 
