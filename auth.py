@@ -1,8 +1,17 @@
 import streamlit as st
+import extra_streamlit_components as stx
 from db import create_supabase_client
+import time
+from datetime import datetime, timedelta
 
 # Note: We do NOT import the global 'supabase' object anymore for auth.
 # We create a new client for each session to prevent session leakage.
+
+@st.cache_resource(experimental_allow_widgets=True)
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
 
 def sign_up(email, password):
     """Register a new user with Supabase Auth."""
@@ -36,6 +45,11 @@ def sign_in(email, password):
             st.session_state["supabase_client"] = client
             st.session_state["user"] = response.user
             
+            # Save session to cookies (expires in 7 days)
+            if response.session:
+                cookie_manager.set('supabase_access_token', response.session.access_token, expires_at=datetime.now() + timedelta(days=7))
+                cookie_manager.set('supabase_refresh_token', response.session.refresh_token, expires_at=datetime.now() + timedelta(days=7))
+            
             # Fetch User Role
             try:
                 profile = client.table("profiles").select("role").eq("id", response.user.id).single().execute()
@@ -54,6 +68,10 @@ def sign_in(email, password):
 def sign_out():
     """Log out the current user."""
     try:
+        # Clear cookies
+        cookie_manager.delete('supabase_access_token')
+        cookie_manager.delete('supabase_refresh_token')
+        
         if "supabase_client" in st.session_state:
             st.session_state["supabase_client"].auth.sign_out()
             del st.session_state["supabase_client"]
@@ -98,6 +116,30 @@ def get_current_user():
                 return user_response.user
         except Exception:
             pass
+            
+    # Try to restore from cookies
+    try:
+        access_token = cookie_manager.get('supabase_access_token')
+        refresh_token = cookie_manager.get('supabase_refresh_token')
+        
+        if access_token and refresh_token:
+            client = create_supabase_client()
+            if client:
+                res = client.auth.set_session(access_token, refresh_token)
+                if res.user:
+                    st.session_state["supabase_client"] = client
+                    st.session_state["user"] = res.user
+                    
+                    # Fetch Role
+                    try:
+                        profile = client.table("profiles").select("role").eq("id", res.user.id).single().execute()
+                        st.session_state["user_role"] = profile.data.get("role", "user") if profile.data else "user"
+                    except:
+                        st.session_state["user_role"] = "user"
+                        
+                    return res.user
+    except Exception as e:
+        print(f"Session restore failed: {e}")
             
     return None
 

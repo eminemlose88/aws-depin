@@ -4,3 +4,4 @@ supabase
 cryptography
 paramiko
 pandas
+extra-streamlit-components
