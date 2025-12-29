@@ -75,6 +75,18 @@ def check_db_connection():
     try:
         # Try to select 1 row to check if table exists
         client.table("instances").select("id").limit(1).execute()
+        
+        # Also check for new schema columns in aws_credentials
+        try:
+            client.table("aws_credentials").select("vcpu_limit").limit(1).execute()
+        except Exception as e:
+             if "does not exist" in str(e):
+                 st.error("🚨 数据库架构需要更新！(缺少 vCPU 配额字段)")
+                 st.warning("请在 Supabase SQL Editor 中运行 `update_quota_schema.sql` 的内容。")
+                 with open("update_quota_schema.sql", "r", encoding="utf-8") as f:
+                     st.code(f.read(), language="sql")
+                 return False
+                 
         return True
     except Exception as e:
         # Check if error contains "relation" and "does not exist"

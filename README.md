@@ -12,9 +12,10 @@
     *   **Meson (GagaNode)**: 基于二进制文件部署。
     *   **Shardeum + Titan (Combo)**: 适合 16GB+ 内存机型，同时运行 Shardeum 验证节点与 Titan（流量掩护）。
     *   **Babylon + Traffmonetizer (Combo)**: 适合存储型节点，同时运行 Babylon 验证节点与 Traffmonetizer（流量掩护）。
+    *   **Dante Proxy**: 标准 SOCKS5 代理服务器，适合利用闲置 IP 资源。
 *   **自动化运维**:
     *   自动匹配 Amazon Linux 2023 AMI。
-    *   自动配置安全组（自动开放 8080, 9001, 10001, 26656 等必要端口）。
+    *   自动配置安全组（自动开放 8080, 9001, 10001, 26656, 1080 等必要端口）。
     *   自动生成 UserData 启动脚本。
     *   自动分配公网 IP 并打上项目标签 (`Project`, `Name`)。
 *   **动态 UI**: 基于 Streamlit，根据所选项目自动渲染所需的参数输入框。

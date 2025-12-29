@@ -145,6 +145,59 @@ systemctl daemon-reload
 systemctl enable babylond
 systemctl start babylond
 """
+    },
+    "Dante_Socks5_Proxy": {
+        "description": "Standard SOCKS5 Proxy Server (Dante)",
+        "params": ["proxy_user", "proxy_password", "proxy_port"],
+        "script_template": """#!/bin/bash
+# Install Dante Server
+yum install -y http://mirror.ghettoforge.org/distributions/gf/gf-release-latest.gf.el7.noarch.rpm
+yum install -y dante-server
+
+# Backup original config
+cp /etc/sockd.conf /etc/sockd.conf.bak
+
+# Create Config
+cat <<EOF > /etc/sockd.conf
+logoutput: syslog
+user.privileged: root
+user.unprivileged: nobody
+
+# The listening network interface or address.
+internal: 0.0.0.0 port = {proxy_port}
+
+# The proxying network interface or address.
+external: eth0
+
+# socksmethod: username none # No auth
+socksmethod: username
+
+# Client access rules
+client pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error # connect disconnect
+}
+
+# Server operation rules
+socks pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error # connect disconnect
+}
+EOF
+
+# Create User
+useradd {proxy_user}
+echo "{proxy_password}" | passwd --stdin {proxy_user}
+
+# Open Port in Firewall (if firewalld is running, though AWS SG handles it mostly)
+systemctl start firewalld
+firewall-cmd --zone=public --add-port={proxy_port}/tcp --permanent
+firewall-cmd --reload
+
+# Start Service
+systemctl enable sockd
+systemctl start sockd
+"""
     }
 }
 

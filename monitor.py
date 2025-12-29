@@ -58,6 +58,16 @@ def check_instance_process(ip, private_key_str, project_name):
             else:
                 client.close()
                 return False, "Process 'gaganode' not found"
+        elif "Dante" in project_name or "Proxy" in project_name:
+            # Check sockd service
+            stdin, stdout, stderr = client.exec_command("systemctl is-active sockd")
+            output = stdout.read().decode().strip()
+            if output == "active":
+                client.close()
+                return True, "Service 'sockd' is active"
+            else:
+                client.close()
+                return False, f"Service 'sockd' is {output}"
         else:
             # Default generic check: just check if docker is alive
             target_container = "docker" 
@@ -127,6 +137,12 @@ def detect_installed_project(ip, private_key_str):
         if stdout.read().decode().strip():
             client.close()
             return "Meson (GagaNode)", "GagaNode process running"
+
+        # 5. Check for Dante Proxy (Service 'sockd')
+        stdin, stdout, stderr = client.exec_command("systemctl is-active sockd")
+        if stdout.read().decode().strip() == "active":
+             client.close()
+             return "Dante_Socks5_Proxy", "Dante Proxy active"
             
         client.close()
         return None, "No known project detected"
