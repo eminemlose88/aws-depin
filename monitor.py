@@ -68,6 +68,48 @@ def check_instance_process(ip, private_key_str, project_name):
     except Exception as e:
         return False, f"SSH Connection Failed: {str(e)}"
 
+def detect_installed_project(ip, private_key_str):
+    """
+    Connect via SSH and detect if any known project is running.
+    Returns: (project_name: str | None, msg: str)
+    """
+    if not ip or not private_key_str:
+        return None, "Missing IP or Private Key"
+
+    key_file = io.StringIO(private_key_str)
+    try:
+        pkey = paramiko.RSAKey.from_private_key(key_file)
+    except Exception:
+        try:
+            key_file.seek(0)
+            pkey = paramiko.Ed25519Key.from_private_key(key_file)
+        except Exception as e:
+            return None, f"Invalid Key: {e}"
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(hostname=ip, username='ec2-user', pkey=pkey, timeout=10)
+        
+        # 1. Check for Titan Network (Docker container 'titan-edge')
+        stdin, stdout, stderr = client.exec_command("sudo docker ps --format '{{.Names}}' | grep titan-edge")
+        if stdout.read().decode().strip():
+            client.close()
+            return "Titan Network", "Titan container running"
+            
+        # 2. Check for Meson / GagaNode (Process 'gaganode')
+        stdin, stdout, stderr = client.exec_command("pgrep -f gaganode")
+        if stdout.read().decode().strip():
+            client.close()
+            return "Meson (GagaNode)", "GagaNode process running"
+            
+        client.close()
+        return None, "No known project detected"
+
+    except Exception as e:
+        return None, f"SSH Connection Failed: {str(e)}"
+
 def install_project_via_ssh(ip, private_key_str, script_base64):
     """
     Connect via SSH and execute the installation script.

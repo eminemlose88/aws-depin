@@ -53,7 +53,7 @@ def admin_dashboard():
         if users:
             # Display as table
             df = pd.DataFrame(users)
-            st.dataframe(df[["id", "email", "balance", "role", "membership_tier", "created_at"]], use_container_width=True)
+            st.dataframe(df[["id", "email", "balance", "role", "membership_tier", "created_at"]], width="stretch")
 
             st.divider()
             st.subheader("✏️ 余额调整 / 编辑用户")

@@ -238,6 +238,21 @@ def update_instance_status(instance_id, new_status):
     except Exception as e:
         print(f"Error updating instance status: {e}")
 
+def update_instance_project(instance_id, project_name):
+    """
+    Update the project name of an instance in the database.
+    """
+    client = get_supabase()
+    if not client: return
+    try:
+        client.table("instances") \
+            .update({"project_name": project_name}) \
+            .eq("instance_id", instance_id) \
+            .execute()
+        print(f"Updated instance {instance_id} project to {project_name}")
+    except Exception as e:
+        print(f"Error updating instance project: {e}")
+
 def update_instance_health(instance_id, health_status):
     """Update the health check status of an instance."""
     client = get_supabase()

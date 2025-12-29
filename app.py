@@ -5,9 +5,9 @@ import pandas as pd
 import time
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity
 from templates import PROJECT_REGISTRY, generate_script
-from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_project
 from auth import login_page, get_current_user, sign_out
-from monitor import check_instance_process, install_project_via_ssh
+from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
 from billing import check_balance, get_user_profile, add_balance, process_daily_billing, calculate_daily_cost, BASE_DAILY_FEE, EC2_INSTANCE_FEE, LIGHTSAIL_INSTANCE_FEE, GFW_CHECK_FEE
 
 # Import Admin Dashboard
@@ -331,8 +331,51 @@ with tab_manage:
     
     col_refresh, col_scan = st.columns([1, 4])
     with col_refresh:
-        if st.button("🔄 刷新状态"):
-            st.rerun()
+        if st.button("🔄 深度刷新 (项目状态)", help="同时检查AWS实例状态和项目运行情况"):
+            with st.spinner("正在进行全量深度检查..."):
+                # 1. Fetch current instances from DB
+                current_instances = get_user_instances(user.id)
+                
+                # 2. Filter valid ones (Running only)
+                targets = [i for i in current_instances if i['status'] == 'running']
+                
+                if not targets:
+                    st.info("没有运行中的实例需检查")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    for idx, inst in enumerate(targets):
+                        status_text.text(f"Checking {inst['ip_address']} ({inst['project_name']})...")
+                        
+                        # SSH Check
+                        pkey = get_instance_private_key(inst['instance_id'])
+                        if pkey:
+                            # 1. Auto-detect project if Pending or forcing refresh
+                            detected_proj, det_msg = detect_installed_project(inst['ip_address'], pkey)
+                            
+                            if detected_proj:
+                                # If we detected a project and it's different from DB (or DB is Pending), update it
+                                if detected_proj != inst['project_name']:
+                                    update_instance_project(inst['instance_id'], detected_proj)
+                                    inst['project_name'] = detected_proj # Update local var for next check
+                                    st.toast(f"Detected {detected_proj} on {inst['ip_address']}", icon="✅")
+                            
+                            # 2. Check health based on (possibly updated) project
+                            is_healthy, msg = check_instance_process(inst['ip_address'], pkey, inst['project_name'])
+                            new_health = "Healthy" if is_healthy else f"Error: {msg}"
+                        else:
+                            new_health = "Error: Missing Private Key"
+                        
+                        update_instance_health(inst['instance_id'], new_health)
+                        progress_bar.progress((idx + 1) / len(targets))
+                    
+                    status_text.empty()
+                    st.success("深度检查完成！")
+                    time.sleep(1)
+                    st.rerun()
             
     with col_scan:
         if st.button("🌍 全网扫描 & 同步"):
@@ -436,11 +479,90 @@ with tab_manage:
                 })
             
             df = pd.DataFrame(display_data).drop(columns=["_cred_id", "_has_key"])
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
             
             st.divider()
 
+            # --- Advanced Actions & Installation ---
+            st.subheader("🛠️ 深度运维 & 项目安装")
+            
+            col_target, col_actions = st.columns([2, 2])
+            
+            with col_target:
+                ssh_ready_instances = [d for d in display_data if d['Status'] == 'running' and d['_has_key']]
+                if not ssh_ready_instances:
+                    st.caption("没有可操作的实例")
+                    selected_ssh_instance = None
+                else:
+                    selected_ssh_instance = st.selectbox(
+                        "选择目标实例",
+                        [d['Instance ID'] for d in ssh_ready_instances],
+                        format_func=lambda x: f"{x} - {next((d['Project'] for d in ssh_ready_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in ssh_ready_instances if d['Instance ID'] == x), '')})"
+                    )
+
+            with col_actions:
+                if selected_ssh_instance:
+                    target_info = next((d for d in display_data if d['Instance ID'] == selected_ssh_instance), None)
+                    
+                    # Install Project UI
+                    with st.expander("📦 安装/切换项目", expanded=True):
+                        proj_options = list(PROJECT_REGISTRY.keys())
+                        target_proj = st.selectbox("选择要安装的项目", proj_options)
+                        
+                        # Params inputs
+                        proj_conf = PROJECT_REGISTRY[target_proj]
+                        input_params = {}
+                        for p in proj_conf['params']:
+                            input_params[p] = st.text_input(f"{p}", key=f"inst_{p}")
+                            
+                        if st.button("开始安装", type="primary"):
+                            # Validate Params
+                            missing_params = [p for p in proj_conf['params'] if not input_params.get(p)]
+                            if missing_params:
+                                st.error(f"请填写必要参数: {', '.join(missing_params)}")
+                            else:
+                                allowed, msg = check_balance(user.id)
+                                if not allowed:
+                                    st.error(msg)
+                                else:
+                                    with st.spinner("正在通过 SSH 安装..."):
+                                        pkey = get_instance_private_key(selected_ssh_instance)
+                                        if not pkey:
+                                            st.error("无法解密私钥")
+                                        else:
+                                            script = generate_script(target_proj, **input_params)
+                                            res = install_project_via_ssh(target_info['IP Address'], pkey, script)
+                                            
+                                            if res['status'] == 'success':
+                                                update_instance_project(selected_ssh_instance, target_proj)
+                                                st.success(f"安装指令已发送！")
+                                                st.info("请稍后刷新查看状态。")
+                                                with st.expander("查看输出"):
+                                                    st.code(res['output'])
+                                            else:
+                                                st.error(f"安装失败: {res['msg']}")
+
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.button("🔍 深度检测"):
+                             # Balance Check
+                            allowed, msg = check_balance(user.id)
+                            if not allowed:
+                                st.error(msg)
+                            else:
+                                with st.spinner("Checking..."):
+                                    pkey = get_instance_private_key(selected_ssh_instance)
+                                    if pkey:
+                                        is_healthy, msg = check_instance_process(target_info['IP Address'], pkey, target_info['Project'])
+                                        new_health = "Healthy" if is_healthy else f"Error: {msg}"
+                                        update_instance_health(selected_ssh_instance, new_health)
+                                        if is_healthy: st.success(msg)
+                                        else: st.error(msg)
+                                        time.sleep(1)
+                                        st.rerun()
+
             # --- 3.1 Batch Project Installation ---
+            st.divider()
             st.subheader("📦 批量项目安装")
             
             # Filter SSH-ready instances
@@ -459,7 +581,7 @@ with tab_manage:
                     proj_conf = PROJECT_REGISTRY[target_proj]
                     input_params = {}
                     for p in proj_conf['params']:
-                        input_params[p] = st.text_input(f"{p}", key=f"batch_inst_{p}")
+                        input_params[p] = st.text_input(f"{p}", key=f"batch_inst_{p}").strip()
 
                 # Instance Selection
                 st.write("选择目标实例:")
@@ -474,39 +596,45 @@ with tab_manage:
                     if not selected_inst_labels:
                         st.error("请选择至少一个实例")
                     else:
-                        allowed, msg = check_balance(user.id)
-                        if not allowed:
-                            st.error(msg)
+                        # Validate Params
+                        missing_params = [p for p in proj_conf['params'] if not input_params.get(p)]
+                        if missing_params:
+                            st.error(f"请填写必要参数: {', '.join(missing_params)}")
                         else:
-                            # Generate script once
-                            script = generate_script(target_proj, **input_params)
-                            
-                            progress_bar = st.progress(0)
-                            status_area = st.empty()
-                            results = []
-                            target_ids = [instance_options[l] for l in selected_inst_labels]
-                            
-                            for i, i_id in enumerate(target_ids):
-                                target_data = next(d for d in display_data if d['Instance ID'] == i_id)
-                                status_area.text(f"Installing on {target_data['IP Address']}...")
+                            allowed, msg = check_balance(user.id)
+                            if not allowed:
+                                st.error(msg)
+                            else:
+                                # Generate script once
+                                script = generate_script(target_proj, **input_params)
                                 
-                                pkey = get_instance_private_key(i_id)
-                                if pkey:
-                                    res = install_project_via_ssh(target_data['IP Address'], pkey, script)
-                                    if res['status'] == 'success':
-                                        results.append(f"✅ {target_data['IP Address']}: 指令已发送")
+                                progress_bar = st.progress(0)
+                                status_area = st.empty()
+                                results = []
+                                target_ids = [instance_options[l] for l in selected_inst_labels]
+                                
+                                for i, i_id in enumerate(target_ids):
+                                    target_data = next(d for d in display_data if d['Instance ID'] == i_id)
+                                    status_area.text(f"Installing on {target_data['IP Address']}...")
+                                    
+                                    pkey = get_instance_private_key(i_id)
+                                    if pkey:
+                                        res = install_project_via_ssh(target_data['IP Address'], pkey, script)
+                                        if res['status'] == 'success':
+                                            update_instance_project(i_id, target_proj)
+                                            results.append(f"✅ {target_data['IP Address']}: 指令已发送")
+                                        else:
+                                            results.append(f"❌ {target_data['IP Address']}: {res['msg']}")
                                     else:
-                                        results.append(f"❌ {target_data['IP Address']}: {res['msg']}")
-                                else:
-                                    results.append(f"❌ {target_data['IP Address']}: 无法获取私钥")
+                                        results.append(f"❌ {target_data['IP Address']}: 无法获取私钥")
+                                    
+                                    progress_bar.progress((i + 1) / len(target_ids))
                                 
-                                progress_bar.progress((i + 1) / len(target_ids))
-                            
-                            status_area.empty()
-                            st.success("批量安装指令发送完成！")
-                            with st.expander("查看详细结果", expanded=True):
-                                for r in results:
-                                    st.write(r)
+                                status_area.empty()
+                                st.success("批量安装指令发送完成！")
+                                with st.expander("查看详细结果", expanded=True):
+                                    for r in results:
+                                        st.write(r)
 
             # Terminate (No balance check needed for cleanup?)
             st.divider()
