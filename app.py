@@ -102,6 +102,43 @@ default_project = config.get('project', list(PROJECT_REGISTRY.keys())[0])
 with tab_creds:
     st.header("AWS 凭证管理")
     
+    # 1.1 Batch Import Section
+    with st.expander("📥 批量导入凭证", expanded=False):
+        st.caption("格式：`备注, AccessKey, SecretKey` (每行一个，使用英文逗号分隔)")
+        batch_input = st.text_area("粘贴凭证列表", height=150, placeholder="Account1, AKIA..., wJalr...\nAccount2, AKIA..., 8klM...")
+        
+        if st.button("开始批量导入"):
+            if not batch_input.strip():
+                st.error("请输入凭证信息")
+            else:
+                lines = batch_input.strip().split('\n')
+                success_count = 0
+                fail_count = 0
+                
+                progress_bar = st.progress(0)
+                
+                for i, line in enumerate(lines):
+                    try:
+                        parts = [p.strip() for p in line.split(',')]
+                        if len(parts) >= 3:
+                            alias, ak, sk = parts[0], parts[1], parts[2]
+                            if add_aws_credential(user.id, alias, ak, sk):
+                                success_count += 1
+                            else:
+                                fail_count += 1
+                        else:
+                            fail_count += 1
+                    except Exception:
+                        fail_count += 1
+                    progress_bar.progress((i + 1) / len(lines))
+                
+                st.success(f"导入完成: 成功 {success_count}, 失败 {fail_count}")
+                time.sleep(1)
+                st.rerun()
+
+    st.divider()
+
+    # 1.2 Single Add & List (Existing)
     col_add, col_check = st.columns([3, 1])
     with col_add:
         st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
@@ -126,8 +163,8 @@ with tab_creds:
                         time.sleep(1)
                         st.rerun()
 
-    # Add new credential
-    with st.expander("➕ 添加新凭证", expanded=False):
+    # Add new credential (Single)
+    with st.expander("➕ 添加单条凭证", expanded=False):
         with st.form("add_cred_form"):
             alias = st.text_input("备注名称 (如: 公司测试号)", placeholder="My AWS Account")
             ak = st.text_input("Access Key ID", type="password")
@@ -198,47 +235,69 @@ with tab_deploy:
 
         st.subheader("启动基础实例 (Base Instance)")
         
-        # Select Credential
-        cred_options = {c['alias_name']: c for c in creds}
-        selected_alias = st.selectbox("选择 AWS 账号", list(cred_options.keys()))
-        selected_cred = cred_options[selected_alias]
+        # 2.1 Batch Launch Selection
+        st.write("选择要部署的 AWS 账号 (可多选):")
         
-        if selected_cred.get('status') == 'suspended':
-            st.error("⚠️ 该账号已被标记为封禁/欠费，部署可能会失败！")
+        # Filter active creds
+        active_creds = [c for c in creds if c.get('status') != 'suspended']
+        cred_options = {f"{c['alias_name']} ({c['access_key_id'][:6]}...)": c['id'] for c in active_creds}
         
-        if st.button("🚀 启动纯净实例", type="primary"):
-            # Balance Check
-            allowed, msg = check_balance(user.id)
-            if not allowed:
-                st.error(f"❌ {msg}")
+        selected_cred_labels = st.multiselect(
+            "目标账号", 
+            options=list(cred_options.keys()),
+            default=[]
+        )
+        
+        if st.button("🚀 批量启动实例", type="primary"):
+            if not selected_cred_labels:
+                st.error("请至少选择一个账号")
             else:
-                with st.status("正在启动基础实例...", expanded=True) as status:
-                    status.write("☁️ 连接 AWS API...")
-                    result = launch_base_instance(
-                        selected_cred['access_key_id'],
-                        selected_cred['secret_access_key'],
-                        region
-                    )
+                # Balance Check
+                allowed, msg = check_balance(user.id)
+                if not allowed:
+                    st.error(f"❌ {msg}")
+                else:
+                    # Confirm Launch
+                    target_creds = [next(c for c in creds if c['id'] == cred_options[label]) for label in selected_cred_labels]
                     
-                    if result['status'] == 'success':
-                        status.write("💾 记录数据库...")
-                        log_instance(
-                            user_id=user.id,
-                            credential_id=selected_cred['id'],
-                            instance_id=result['id'],
-                            ip=result['ip'],
-                            region=region,
-                            project_name="Pending", # Mark as Pending
-                            status="active",
-                            private_key=result.get('private_key')
-                        )
-                        status.update(label="启动成功！", state="complete", expanded=False)
-                        st.success(f"✅ 实例 {result['id']} 已启动！请前往“实例监控”页安装项目。")
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        status.update(label="启动失败", state="error")
-                        st.error(result['msg'])
+                    progress_bar = st.progress(0)
+                    status_area = st.empty()
+                    results = []
+                    
+                    for i, cred in enumerate(target_creds):
+                        status_area.text(f"正在启动: {cred['alias_name']}...")
+                        
+                        try:
+                            result = launch_base_instance(
+                                cred['access_key_id'],
+                                cred['secret_access_key'],
+                                region
+                            )
+                            
+                            if result['status'] == 'success':
+                                log_instance(
+                                    user_id=user.id,
+                                    credential_id=cred['id'],
+                                    instance_id=result['id'],
+                                    ip=result['ip'],
+                                    region=region,
+                                    project_name="Pending",
+                                    status="active",
+                                    private_key=result.get('private_key')
+                                )
+                                results.append(f"✅ {cred['alias_name']}: 成功 ({result['id']})")
+                            else:
+                                results.append(f"❌ {cred['alias_name']}: 失败 - {result['msg']}")
+                        except Exception as e:
+                            results.append(f"❌ {cred['alias_name']}: 异常 - {str(e)}")
+                            
+                        progress_bar.progress((i + 1) / len(target_creds))
+                    
+                    status_area.empty()
+                    st.success("批量操作完成！")
+                    with st.expander("查看详细结果", expanded=True):
+                        for r in results:
+                            st.write(r)
 
 # ====================
 # TAB 3: Manage Instances
@@ -357,80 +416,73 @@ with tab_manage:
             
             st.divider()
 
-            # --- Advanced Actions & Installation ---
-            st.subheader("🛠️ 深度运维 & 项目安装")
+            # --- 3.1 Batch Project Installation ---
+            st.subheader("📦 批量项目安装")
             
-            col_target, col_actions = st.columns([2, 2])
+            # Filter SSH-ready instances
+            ssh_ready_instances = [d for d in display_data if d['Status'] == 'running' and d['_has_key']]
             
-            with col_target:
-                ssh_ready_instances = [d for d in display_data if d['Status'] == 'running' and d['_has_key']]
-                if not ssh_ready_instances:
-                    st.caption("没有可操作的实例")
-                    selected_ssh_instance = None
-                else:
-                    selected_ssh_instance = st.selectbox(
-                        "选择目标实例",
-                        [d['Instance ID'] for d in ssh_ready_instances],
-                        format_func=lambda x: f"{x} - {next((d['Project'] for d in ssh_ready_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in ssh_ready_instances if d['Instance ID'] == x), '')})"
-                    )
+            if not ssh_ready_instances:
+                st.caption("没有可操作的实例 (需 Running 且有私钥)")
+            else:
+                # Project Selection First
+                col_proj, col_params = st.columns([1, 2])
+                with col_proj:
+                    proj_options = list(PROJECT_REGISTRY.keys())
+                    target_proj = st.selectbox("选择要安装的项目", proj_options, key="batch_proj_select")
+                
+                with col_params:
+                    proj_conf = PROJECT_REGISTRY[target_proj]
+                    input_params = {}
+                    for p in proj_conf['params']:
+                        input_params[p] = st.text_input(f"{p}", key=f"batch_inst_{p}")
 
-            with col_actions:
-                if selected_ssh_instance:
-                    target_info = next((d for d in display_data if d['Instance ID'] == selected_ssh_instance), None)
-                    
-                    # Install Project UI
-                    with st.expander("📦 安装/切换项目", expanded=True):
-                        proj_options = list(PROJECT_REGISTRY.keys())
-                        target_proj = st.selectbox("选择要安装的项目", proj_options)
-                        
-                        # Params inputs
-                        proj_conf = PROJECT_REGISTRY[target_proj]
-                        input_params = {}
-                        for p in proj_conf['params']:
-                            input_params[p] = st.text_input(f"{p}", key=f"inst_{p}")
+                # Instance Selection
+                st.write("选择目标实例:")
+                instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Account']}": d['Instance ID'] for d in ssh_ready_instances}
+                selected_inst_labels = st.multiselect(
+                    "勾选实例",
+                    options=list(instance_options.keys()),
+                    default=[]
+                )
+                
+                if st.button("🚀 开始批量安装", type="primary"):
+                    if not selected_inst_labels:
+                        st.error("请选择至少一个实例")
+                    else:
+                        allowed, msg = check_balance(user.id)
+                        if not allowed:
+                            st.error(msg)
+                        else:
+                            # Generate script once
+                            script = generate_script(target_proj, **input_params)
                             
-                        if st.button("开始安装", type="primary"):
-                            allowed, msg = check_balance(user.id)
-                            if not allowed:
-                                st.error(msg)
-                            else:
-                                with st.spinner("正在通过 SSH 安装..."):
-                                    pkey = get_instance_private_key(selected_ssh_instance)
-                                    if not pkey:
-                                        st.error("无法解密私钥")
+                            progress_bar = st.progress(0)
+                            status_area = st.empty()
+                            results = []
+                            target_ids = [instance_options[l] for l in selected_inst_labels]
+                            
+                            for i, i_id in enumerate(target_ids):
+                                target_data = next(d for d in display_data if d['Instance ID'] == i_id)
+                                status_area.text(f"Installing on {target_data['IP Address']}...")
+                                
+                                pkey = get_instance_private_key(i_id)
+                                if pkey:
+                                    res = install_project_via_ssh(target_data['IP Address'], pkey, script)
+                                    if res['status'] == 'success':
+                                        results.append(f"✅ {target_data['IP Address']}: 指令已发送")
                                     else:
-                                        script = generate_script(target_proj, **input_params)
-                                        res = install_project_via_ssh(target_info['IP Address'], pkey, script)
-                                        
-                                        if res['status'] == 'success':
-                                            st.success(f"安装指令已发送！")
-                                            # Update project name in DB (hacky direct update or create separate function)
-                                            # For now, just rely on next sync or manual update
-                                            # Ideally: client.table("instances").update({"project_name": target_proj})...
-                                            st.info("请稍后刷新查看状态。")
-                                            with st.expander("查看输出"):
-                                                st.code(res['output'])
-                                        else:
-                                            st.error(f"安装失败: {res['msg']}")
-
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        if st.button("🔍 深度检测"):
-                             # Balance Check
-                            allowed, msg = check_balance(user.id)
-                            if not allowed:
-                                st.error(msg)
-                            else:
-                                with st.spinner("Checking..."):
-                                    pkey = get_instance_private_key(selected_ssh_instance)
-                                    if pkey:
-                                        is_healthy, msg = check_instance_process(target_info['IP Address'], pkey, target_info['Project'])
-                                        new_health = "Healthy" if is_healthy else f"Error: {msg}"
-                                        update_instance_health(selected_ssh_instance, new_health)
-                                        if is_healthy: st.success(msg)
-                                        else: st.error(msg)
-                                        time.sleep(1)
-                                        st.rerun()
+                                        results.append(f"❌ {target_data['IP Address']}: {res['msg']}")
+                                else:
+                                    results.append(f"❌ {target_data['IP Address']}: 无法获取私钥")
+                                
+                                progress_bar.progress((i + 1) / len(target_ids))
+                            
+                            status_area.empty()
+                            st.success("批量安装指令发送完成！")
+                            with st.expander("查看详细结果", expanded=True):
+                                for r in results:
+                                    st.write(r)
 
             # Terminate (No balance check needed for cleanup?)
             st.divider()
