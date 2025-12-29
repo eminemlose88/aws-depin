@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from datetime import datetime
 from crypto import encrypt_key, decrypt_key
 
@@ -16,26 +16,49 @@ elif not url and hasattr(st, "secrets"): # Handle flat secrets structure
     url = st.secrets.get("SUPABASE_URL")
     key = st.secrets.get("SUPABASE_KEY")
 
-# WARNING: This global client should ONLY be used for initial setup or anonymous requests.
-# It should NOT be used for authenticated user actions to prevent session leakage.
+# WARNING: Global client removed to prevent session leakage.
+# All authenticated operations must use the session-specific client.
 _global_supabase: Client = None
+
+# Only initialize global client if strictly necessary for anonymous access, 
+# AND explicitly disable persistence to prevent state pollution.
 if url and key:
     try:
-        _global_supabase = create_client(url, key)
+        _global_supabase = create_client(
+            url, 
+            key,
+            options=ClientOptions(
+                auto_refresh_token=False,
+                persist_session=False, # CRITICAL: Disable persistence
+                storage=None
+            )
+        )
     except Exception as e:
         print(f"Failed to initialize global Supabase client: {e}")
 
 def create_supabase_client():
-    """Create a new Supabase client instance."""
+    """
+    Create a new Supabase client instance.
+    CRITICAL: Must disable session persistence to prevent session leakage between users
+    on shared file systems (like Streamlit Cloud).
+    """
     if url and key:
-        return create_client(url, key)
+        return create_client(
+            url, 
+            key,
+            options=ClientOptions(
+                auto_refresh_token=False,
+                persist_session=False, # CRITICAL: Disable persistence
+                storage=None
+            )
+        )
     return None
 
 def get_supabase():
     """
     Get the appropriate Supabase client.
     Prioritizes the session-specific client if logged in.
-    Fallback to global client (which might be limited by RLS).
+    Fallback to global client (which is now stateless/anonymous).
     """
     if "supabase_client" in st.session_state:
         return st.session_state["supabase_client"]
