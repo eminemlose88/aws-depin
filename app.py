@@ -247,6 +247,25 @@ with tab_deploy:
 
         st.subheader("启动基础实例 (Base Instance)")
         
+        # 2.0 Launch Mode Selection
+        st.write("配置实例规格:")
+        launch_mode = st.radio(
+            "启动模式", 
+            ["标准 (Standard)", "Alpha 舰队 (高内存)", "Beta 舰队 (存储/内存)", "自定义 (Custom)"],
+            help="Alpha: r5.large (16GB RAM) | Beta: m5.large (8GB RAM) | Standard: t2.micro"
+        )
+        
+        target_instance_type = 't2.micro'
+        if "Alpha" in launch_mode:
+            target_instance_type = 'r5.large'
+        elif "Beta" in launch_mode:
+            target_instance_type = 'm5.large'
+        elif "自定义" in launch_mode:
+            target_instance_type = st.selectbox(
+                "选择实例类型",
+                ['t2.micro', 't3.medium', 't3.large', 't3.xlarge', 'm5.large', 'm5.xlarge', 'r5.large', 'r5.xlarge', 'c5.large', 'c5.xlarge']
+            )
+
         # 2.1 Batch Launch Selection
         st.write("选择要部署的 AWS 账号 (可多选):")
         
@@ -296,7 +315,8 @@ with tab_deploy:
                             result = launch_base_instance(
                                 cred['access_key_id'],
                                 cred['secret_access_key'],
-                                region
+                                region,
+                                instance_type=target_instance_type
                             )
                             
                             if result['status'] == 'success':
@@ -484,6 +504,7 @@ with tab_manage:
                         "Region": inst['region'],
                         "Status": current_status,
                         "Health": health,
+                        "Type": inst.get('instance_type', 'N/A') if 'instance_type' in inst else 'N/A', # Fallback
                         "Created": inst['created_at'][:16].replace('T', ' '),
                         "_cred_id": inst['credential_id'],
                         "_has_key": bool(inst.get('private_key'))
@@ -619,7 +640,31 @@ with tab_manage:
             # Instance Selection
             st.write("选择目标实例:")
             
-            instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Account']}": d['Instance ID'] for d in ssh_ready_instances}
+            # Filter logic: Deduplicate (Hide installed) & Requirements
+            filtered_ready_instances = []
+            
+            for d in ssh_ready_instances:
+                # 1. Deduplication: Hide if already has a project (not Pending/Unknown)
+                if d['Project'] not in ['Pending', 'Unknown']:
+                    continue
+                    
+                # 2. Requirements Check
+                i_type = d.get('Type', 'N/A')
+                # If N/A (old data), we might let it pass or warn. Let's let it pass but maybe warn in label.
+                
+                # Check for Shardeum/Titan (Alpha) -> Need ~16GB (r5, t3.xlarge, m5.xlarge)
+                if "Shardeum" in target_proj or "Titan" in target_proj:
+                     # Simple heuristic: Block micros/smalls if possible, but for now just pass.
+                     # Or strict:
+                     if i_type != 'N/A' and i_type in ['t2.micro', 't3.micro', 't3.small', 't3.medium']:
+                         continue # Hide small instances for big projects
+                
+                filtered_ready_instances.append(d)
+            
+            if not filtered_ready_instances:
+                st.warning("没有符合条件的空闲实例 (可能所有实例已安装项目，或硬件规格不满足要求)")
+            
+            instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Type']} - {d['Account']}": d['Instance ID'] for d in filtered_ready_instances}
             selected_inst_labels = st.multiselect(
                 "勾选实例",
                 options=list(instance_options.keys()),

@@ -121,7 +121,7 @@ def ensure_security_group(ec2_client):
                 return None
         return None
 
-def launch_base_instance(ak, sk, region, proxy_url=None):
+def launch_base_instance(ak, sk, region, instance_type='t2.micro', proxy_url=None):
     """
     Step 1: Launch a base EC2 instance (Pure OS).
     Returns: {status, ip, id, private_key, msg}
@@ -162,7 +162,7 @@ systemctl enable docker
 """
         response = ec2.run_instances(
             ImageId=ami_id,
-            InstanceType='t2.micro',
+            InstanceType=instance_type,
             MinCount=1,
             MaxCount=1,
             KeyName=key_name,
@@ -241,7 +241,8 @@ def scan_all_instances(ak, sk, region, proxy_url=None):
                     'status': i['State']['Name'],
                     'ip_address': i.get('PublicIpAddress', None),
                     'project_name': p_name,
-                    'region': region
+                    'region': region,
+                    'instance_type': i.get('InstanceType', 'Unknown')
                 })
         return instances
     except Exception:
