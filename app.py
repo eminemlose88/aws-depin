@@ -3,11 +3,12 @@ import json
 import os
 import pandas as pd
 import time
-from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health
+from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health
 from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh
+from billing import check_balance, get_user_profile, add_balance, process_daily_billing, calculate_daily_cost
 
 # Set page configuration
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
@@ -43,6 +44,15 @@ if not user:
 # --- Main App (Authenticated) ---
 
 st.sidebar.markdown(f"👤 **{user.email}**")
+
+# Billing Info in Sidebar
+profile = get_user_profile(user.id)
+balance = float(profile.get("balance", 0.0) if profile else 0.0)
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"💰 **余额: ${balance:.2f}**")
+if balance <= 0:
+    st.sidebar.error("⚠️ 余额不足，服务受限")
+
 if st.sidebar.button("登出"):
     sign_out()
     st.rerun()
@@ -51,7 +61,7 @@ st.title("AWS DePIN Launcher (Pro)")
 st.markdown("多账号管理与一键部署平台。")
 
 # Tabs
-tab_creds, tab_deploy, tab_manage = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控"])
+tab_creds, tab_deploy, tab_manage, tab_billing = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "💳 会员中心"])
 
 # Load existing config
 config = load_config()
@@ -69,19 +79,24 @@ with tab_creds:
         st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
     with col_check:
         if st.button("🏥 一键体检", help="检查所有账号的可用状态"):
-            with st.spinner("正在检查所有账号健康状态..."):
-                creds = get_user_credentials(user.id)
-                if not creds:
-                    st.warning("无账号可检查")
-                else:
-                    for cred in creds:
-                        res = check_account_health(cred['access_key_id'], cred['secret_access_key'])
-                        update_credential_status(cred['id'], res['status'])
-                        if res['status'] != 'active':
-                            st.toast(f"{cred['alias_name']}: {res['msg']}", icon="⚠️")
-                    st.success("检查完成！")
-                    time.sleep(1)
-                    st.rerun()
+            # Check balance first
+            allowed, msg = check_balance(user.id)
+            if not allowed:
+                st.error(msg)
+            else:
+                with st.spinner("正在检查所有账号健康状态..."):
+                    creds = get_user_credentials(user.id)
+                    if not creds:
+                        st.warning("无账号可检查")
+                    else:
+                        for cred in creds:
+                            res = check_account_health(cred['access_key_id'], cred['secret_access_key'])
+                            update_credential_status(cred['id'], res['status'])
+                            if res['status'] != 'active':
+                                st.toast(f"{cred['alias_name']}: {res['msg']}", icon="⚠️")
+                        st.success("检查完成！")
+                        time.sleep(1)
+                        st.rerun()
 
     # Add new credential
     with st.expander("➕ 添加新凭证", expanded=False):
@@ -136,15 +151,13 @@ with tab_creds:
         st.info("暂无凭证，请先添加。")
 
 # ====================
-# TAB 2: Deploy
+# TAB 2: Deploy (Updated Flow)
 # ====================
 with tab_deploy:
     if not creds:
         st.warning("请先在“凭证管理”页面添加 AWS 凭证。")
     else:
-        # --- Sidebar (Shared Config) ---
         st.sidebar.header("部署配置")
-
         # Region selection
         region_options = list(AMI_MAPPING.keys())
         try:
@@ -153,102 +166,51 @@ with tab_deploy:
             r_index = 0
         region = st.sidebar.selectbox("AWS Region", region_options, index=r_index)
 
-        # Project selection
-        project_options = list(PROJECT_REGISTRY.keys())
-        try:
-            p_index = project_options.index(default_project)
-        except ValueError:
-            p_index = 0
-        project_name = st.sidebar.selectbox("选择项目 (Project)", project_options, index=p_index)
+        st.info("💡 **新流程**: 先启动基础实例，然后在“实例监控”页安装具体项目。")
 
-        if st.sidebar.button("保存默认配置"):
-            save_config({'region': region, 'project': project_name})
-
-        # --- Main Interface ---
-        st.subheader("1. 选择账号与项目")
+        st.subheader("启动基础实例 (Base Instance)")
         
         # Select Credential
-        # Filter only active credentials ideally, or show warning
         cred_options = {c['alias_name']: c for c in creds}
         selected_alias = st.selectbox("选择 AWS 账号", list(cred_options.keys()))
         selected_cred = cred_options[selected_alias]
         
         if selected_cred.get('status') == 'suspended':
             st.error("⚠️ 该账号已被标记为封禁/欠费，部署可能会失败！")
-        elif selected_cred.get('status') == 'error':
-            st.warning("⚠️ 该账号上次检查报错，请确认凭证是否有效。")
-
-        st.subheader("2. 配置项目参数")
-        project_info = PROJECT_REGISTRY[project_name]
-        st.info(project_info['description'])
         
-        # Dynamic Form Generation
-        input_params = {}
-        missing_params = []
-
-        with st.container(border=True):
-            for param in project_info['params']:
-                val = st.text_input(f"Enter {param}", key=f"param_{project_name}_{param}")
-                input_params[param] = val.strip()
-                if not val.strip():
-                    missing_params.append(param)
-
-        st.markdown("---")
-
-        # Launch Button
-        if st.button("🚀 立即部署", type="primary", use_container_width=True):
-            if missing_params:
-                st.error(f"❌ 缺少项目参数: {', '.join(missing_params)}")
+        if st.button("🚀 启动纯净实例", type="primary"):
+            # Balance Check
+            allowed, msg = check_balance(user.id)
+            if not allowed:
+                st.error(f"❌ {msg}")
             else:
-                status_container = st.status("正在初始化部署流程...", expanded=True)
-                try:
-                    # 1. Generate Script
-                    status_container.write("🔨 正在生成 User Data 脚本...")
-                    user_data = generate_script(project_name, **input_params)
-                    
-                    # 2. Launch Instance
-                    status_container.write(f"☁️ 正在连接 AWS {region} ({selected_alias})...")
-                    # Note: launch_instance now returns 'private_key'
-                    result = launch_instance(
-                        selected_cred['access_key_id'], 
-                        selected_cred['secret_access_key'], 
-                        region, 
-                        user_data, 
-                        project_name
+                with st.status("正在启动基础实例...", expanded=True) as status:
+                    status.write("☁️ 连接 AWS API...")
+                    result = launch_base_instance(
+                        selected_cred['access_key_id'],
+                        selected_cred['secret_access_key'],
+                        region
                     )
                     
                     if result['status'] == 'success':
-                        # 3. Log to DB
-                        status_container.write("💾 正在记录部署信息到数据库 (包含加密私钥)...")
+                        status.write("💾 记录数据库...")
                         log_instance(
                             user_id=user.id,
                             credential_id=selected_cred['id'],
                             instance_id=result['id'],
                             ip=result['ip'],
                             region=region,
-                            project_name=project_name,
+                            project_name="Pending", # Mark as Pending
                             status="active",
-                            private_key=result.get('private_key') # Pass key for encryption
+                            private_key=result.get('private_key')
                         )
-                        
-                        status_container.update(label="部署成功！", state="complete", expanded=False)
-                        st.success(f"✅ {project_name} 部署成功！")
-                        st.info(f"""
-                        **详细信息:**
-                        - **Account:** `{selected_alias}`
-                        - **Instance ID:** `{result['id']}`
-                        - **Public IP:** `{result['ip']}`
-                        - **Region:** `{region}`
-                        
-                        ⏳ **预计 3-5 分钟后上线**。
-                        """)
+                        status.update(label="启动成功！", state="complete", expanded=False)
+                        st.success(f"✅ 实例 {result['id']} 已启动！请前往“实例监控”页安装项目。")
+                        time.sleep(2)
+                        st.rerun()
                     else:
-                        status_container.update(label="部署失败", state="error", expanded=True)
-                        st.error(f"❌ 启动失败: {result['msg']}")
-                        
-                except Exception as e:
-                    status_container.update(label="发生系统错误", state="error")
-                    st.error(f"异常详情: {str(e)}")
+                        status.update(label="启动失败", state="error")
+                        st.error(result['msg'])
 
 # ====================
 # TAB 3: Manage Instances
@@ -262,115 +224,91 @@ with tab_manage:
             st.rerun()
             
     with col_scan:
-        if st.button("🌍 全网扫描 & 同步", help="扫描所有账号下所有区域的实例，并同步到数据库"):
-            if not creds:
-                st.error("请先添加 AWS 凭证")
+        if st.button("🌍 全网扫描 & 同步"):
+            allowed, msg = check_balance(user.id)
+            if not allowed:
+                st.error(msg)
             else:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                total_steps = len(creds) * len(AMI_MAPPING)
-                current_step = 0
-                total_new = 0
-                total_updated = 0
-                
-                status_text.text("正在初始化全网扫描...")
-                
-                for cred in creds:
-                    # Skip suspended accounts to save time/errors
-                    if cred.get('status') == 'suspended':
-                        status_text.text(f"跳过封禁账号: {cred['alias_name']}...")
-                        current_step += len(AMI_MAPPING)
-                        progress_bar.progress(min(current_step / total_steps, 1.0))
-                        continue
+                if not creds:
+                    st.error("请先添加 AWS 凭证")
+                else:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    total_steps = len(creds) * len(AMI_MAPPING)
+                    current_step = 0
+                    total_new = 0
+                    total_updated = 0
+                    
+                    for cred in creds:
+                        if cred.get('status') == 'suspended':
+                            current_step += len(AMI_MAPPING)
+                            progress_bar.progress(min(current_step / total_steps, 1.0))
+                            continue
 
-                    for region_code in AMI_MAPPING.keys():
-                        current_step += 1
-                        progress = current_step / total_steps
-                        progress_bar.progress(progress)
-                        status_text.text(f"正在扫描: {cred['alias_name']} - {region_code}...")
-                        
-                        # 1. Scan AWS
-                        aws_instances = scan_all_instances(
-                            cred['access_key_id'], 
-                            cred['secret_access_key'], 
-                            region_code
-                        )
-                        
-                        # 2. Sync with DB
-                        if aws_instances:
-                            res = sync_instances(user.id, cred['id'], region_code, aws_instances)
-                            total_new += res['new']
-                            total_updated += res['updated']
-                
-                progress_bar.progress(1.0)
-                status_text.empty()
-                st.success(f"扫描完成！发现 {total_new} 台新机器，更新了 {total_updated} 台机器的状态。")
-                time.sleep(2)
-                st.rerun()
+                        for region_code in AMI_MAPPING.keys():
+                            current_step += 1
+                            progress = current_step / total_steps
+                            progress_bar.progress(progress)
+                            status_text.text(f"Scanning: {cred['alias_name']} - {region_code}...")
+                            
+                            aws_instances = scan_all_instances(
+                                cred['access_key_id'], 
+                                cred['secret_access_key'], 
+                                region_code
+                            )
+                            
+                            if aws_instances:
+                                res = sync_instances(user.id, cred['id'], region_code, aws_instances)
+                                total_new += res['new']
+                                total_updated += res['updated']
+                    
+                    progress_bar.progress(1.0)
+                    status_text.empty()
+                    st.success(f"扫描完成！新增 {total_new}，更新 {total_updated}。")
+                    time.sleep(2)
+                    st.rerun()
 
     with st.spinner("正在同步数据..."):
-        # 1. Get all instances for this user from DB
         db_instances = get_user_instances(user.id)
         
         if not db_instances:
             st.info("暂无实例。")
         else:
-            # 2. Group instances by Credential and Region to optimize AWS calls
-            # Structure: { cred_id: { region: [instance_ids] } }
+            # ... (Existing grouping logic) ...
             batch_map = {}
-            # Helper to quickly find creds
             cred_lookup = {c['id']: c for c in creds}
 
             for inst in db_instances:
                 c_id = inst['credential_id']
-                if not c_id or c_id not in cred_lookup: continue # Skip if cred deleted
-                
+                if not c_id or c_id not in cred_lookup: continue
                 r = inst['region']
                 if c_id not in batch_map: batch_map[c_id] = {}
                 if r not in batch_map[c_id]: batch_map[c_id][r] = []
                 batch_map[c_id][r].append(inst['instance_id'])
             
-            # 3. Fetch Real-time Status from AWS
-            real_time_status = {} # {instance_id: status}
-            
+            real_time_status = {}
             for c_id, regions in batch_map.items():
                 cred = cred_lookup[c_id]
-                # Skip suspended accounts check
-                if cred.get('status') == 'suspended':
-                    continue
-                    
+                if cred.get('status') == 'suspended': continue
                 for r, i_ids in regions.items():
-                    # Call AWS
-                    status_dict = get_instance_status(
-                        cred['access_key_id'], 
-                        cred['secret_access_key'], 
-                        r, 
-                        i_ids
-                    )
+                    status_dict = get_instance_status(cred['access_key_id'], cred['secret_access_key'], r, i_ids)
                     real_time_status.update(status_dict)
             
-            # 4. Prepare Display Data
             display_data = []
             for inst in db_instances:
                 i_id = inst['instance_id']
                 cred_info = inst.get('aws_credentials', {})
                 cred_status = cred_info.get('status', 'active') if cred_info else 'active'
                 
-                # Determine status
-                # If we couldn't fetch (e.g. cred deleted or suspended), keep old status or mark unknown
                 if cred_status == 'suspended':
                     current_status = "account-suspended"
                 else:
                     current_status = real_time_status.get(i_id, inst['status'])
                 
-                # If AWS says 'terminated' but DB says 'active', update DB
                 if current_status != inst['status'] and current_status != "account-suspended":
                     update_instance_status(i_id, current_status)
                 
-                # Get alias
-                alias = cred_info.get('alias_name', 'Unknown/Deleted') if cred_info else 'Unknown'
-
-                # SSH/Health Check status
+                alias = cred_info.get('alias_name', 'Unknown') if cred_info else 'Unknown'
                 health = inst.get('health_status', 'Unknown')
 
                 display_data.append({
@@ -382,30 +320,24 @@ with tab_manage:
                     "Status": current_status,
                     "Health": health,
                     "Created": inst['created_at'][:16].replace('T', ' '),
-                    "_cred_id": inst['credential_id'], # Hidden for logic
-                    "_has_key": bool(inst.get('private_key')) # Check if we have key
+                    "_cred_id": inst['credential_id'],
+                    "_has_key": bool(inst.get('private_key'))
                 })
             
-            # 5. Render Table with new columns
             df = pd.DataFrame(display_data).drop(columns=["_cred_id", "_has_key"])
             st.dataframe(df, use_container_width=True)
             
             st.divider()
 
-            # 6. Advanced Actions (SSH based)
-            st.subheader("🛠️ 深度运维")
+            # --- Advanced Actions & Installation ---
+            st.subheader("🛠️ 深度运维 & 项目安装")
             
             col_target, col_actions = st.columns([2, 2])
             
             with col_target:
-                # Filter active instances that have keys
-                ssh_ready_instances = [
-                    d for d in display_data 
-                    if d['Status'] == 'running' and d['_has_key']
-                ]
-                
+                ssh_ready_instances = [d for d in display_data if d['Status'] == 'running' and d['_has_key']]
                 if not ssh_ready_instances:
-                    st.caption("没有可连接的实例 (需运行中且拥有私钥)")
+                    st.caption("没有可操作的实例")
                     selected_ssh_instance = None
                 else:
                     selected_ssh_instance = st.selectbox(
@@ -418,112 +350,118 @@ with tab_manage:
                 if selected_ssh_instance:
                     target_info = next((d for d in display_data if d['Instance ID'] == selected_ssh_instance), None)
                     
-                    col_btn1, col_btn2 = st.columns(2)
-                    
-                    with col_btn1:
-                        if st.button("🔍 深度检测", help="SSH连入检查Docker容器状态", use_container_width=True):
-                            with st.spinner("正在建立 SSH 连接并检查..."):
-                                # 1. Get Private Key
-                                pkey = get_instance_private_key(selected_ssh_instance)
-                                if not pkey:
-                                    st.error("无法解密私钥")
-                                else:
-                                    # 2. Check Health
-                                    is_healthy, msg = check_instance_process(
-                                        target_info['IP Address'], 
-                                        pkey, 
-                                        target_info['Project']
-                                    )
-                                    
-                                    # 3. Update DB
-                                    new_health = "Healthy" if is_healthy else f"Error: {msg}"
-                                    update_instance_health(selected_ssh_instance, new_health)
-                                    
-                                    if is_healthy:
-                                        st.success(f"检测通过: {msg}")
+                    # Install Project UI
+                    with st.expander("📦 安装/切换项目", expanded=True):
+                        proj_options = list(PROJECT_REGISTRY.keys())
+                        target_proj = st.selectbox("选择要安装的项目", proj_options)
+                        
+                        # Params inputs
+                        proj_conf = PROJECT_REGISTRY[target_proj]
+                        input_params = {}
+                        for p in proj_conf['params']:
+                            input_params[p] = st.text_input(f"{p}", key=f"inst_{p}")
+                            
+                        if st.button("开始安装", type="primary"):
+                            allowed, msg = check_balance(user.id)
+                            if not allowed:
+                                st.error(msg)
+                            else:
+                                with st.spinner("正在通过 SSH 安装..."):
+                                    pkey = get_instance_private_key(selected_ssh_instance)
+                                    if not pkey:
+                                        st.error("无法解密私钥")
                                     else:
-                                        st.error(f"检测失败: {msg}")
-                                    time.sleep(1)
-                                    st.rerun()
-
-                    with col_btn2:
-                        if st.button("🔧 强制修复", help="重新安装项目脚本", type="primary", use_container_width=True):
-                             with st.spinner("正在重装项目..."):
-                                # 1. Get Private Key
-                                pkey = get_instance_private_key(selected_ssh_instance)
-                                if not pkey:
-                                    st.error("无法解密私钥")
-                                else:
-                                    # 2. Re-generate script
-                                    # We need original params. For now, we might need to ask user or store params.
-                                    # Simplification: Use default params or empty (templates usually have defaults)
-                                    # Ideally we should store launch params in DB. 
-                                    # For now, we will warn user or use default script generation.
-                                    project = target_info['Project']
-                                    if project in PROJECT_REGISTRY:
-                                        # Use empty params implies defaults? 
-                                        # Actually generate_script expects args. 
-                                        # Let's try to infer or just use base script.
-                                        # Warning: this might miss user custom codes!
-                                        st.warning("注意：将使用默认/空参数重装。")
-                                        # Mock params with empty strings to avoid errors if script expects them
-                                        params = {p: "REPLACE_ME" for p in PROJECT_REGISTRY[project]['params']}
-                                        script = generate_script(project, **params)
-                                        
-                                        # 3. Install
+                                        script = generate_script(target_proj, **input_params)
                                         res = install_project_via_ssh(target_info['IP Address'], pkey, script)
+                                        
                                         if res['status'] == 'success':
-                                            st.success("重装指令已发送")
+                                            st.success(f"安装指令已发送！")
+                                            # Update project name in DB (hacky direct update or create separate function)
+                                            # For now, just rely on next sync or manual update
+                                            # Ideally: client.table("instances").update({"project_name": target_proj})...
+                                            st.info("请稍后刷新查看状态。")
                                             with st.expander("查看输出"):
                                                 st.code(res['output'])
                                         else:
-                                            st.error(f"重装失败: {res['msg']}")
-                                    else:
-                                        st.error("未知项目类型")
+                                            st.error(f"安装失败: {res['msg']}")
 
-            # 7. Terminate Action (Existing)
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.button("🔍 深度检测"):
+                             # Balance Check
+                            allowed, msg = check_balance(user.id)
+                            if not allowed:
+                                st.error(msg)
+                            else:
+                                with st.spinner("Checking..."):
+                                    pkey = get_instance_private_key(selected_ssh_instance)
+                                    if pkey:
+                                        is_healthy, msg = check_instance_process(target_info['IP Address'], pkey, target_info['Project'])
+                                        new_health = "Healthy" if is_healthy else f"Error: {msg}"
+                                        update_instance_health(selected_ssh_instance, new_health)
+                                        if is_healthy: st.success(msg)
+                                        else: st.error(msg)
+                                        time.sleep(1)
+                                        st.rerun()
+
+            # Terminate (No balance check needed for cleanup?)
             st.divider()
             st.subheader("⚠️ 危险操作")
             term_col1, term_col2 = st.columns([3, 1])
             with term_col1:
-                # Filter out already terminated instances
                 active_instances = [d for d in display_data if d['Status'] not in ['terminated', 'shutting-down', 'account-suspended']]
-                if not active_instances:
-                    st.caption("没有活跃实例可操作")
-                    instance_to_term = None
-                else:
-                    instance_to_term = st.selectbox(
-                        "选择要关闭的实例", 
-                        [d['Instance ID'] for d in active_instances],
-                        format_func=lambda x: f"{x} ({next((d['Account'] for d in active_instances if d['Instance ID'] == x), '')})",
-                        key="term_select"
-                    )
+                instance_to_term = st.selectbox("选择要关闭的实例", [d['Instance ID'] for d in active_instances], key="term_select") if active_instances else None
             
             with term_col2:
-                if instance_to_term:
-                    if st.button("🛑 关闭实例", type="primary"):
-                        # Find details
-                        target = next((d for d in display_data if d['Instance ID'] == instance_to_term), None)
-                        if target:
-                            cred_id = target['_cred_id']
-                            region = target['Region']
-                            
-                            # Get creds
-                            cred = cred_lookup.get(cred_id)
-                            if cred:
-                                with st.spinner(f"正在关闭 {instance_to_term}..."):
-                                    res = terminate_instance(
-                                        cred['access_key_id'], 
-                                        cred['secret_access_key'], 
-                                        region, 
-                                        instance_to_term
-                                    )
-                                    if res['status'] == 'success':
-                                        st.success("关闭指令已发送")
-                                        update_instance_status(instance_to_term, "shutting-down")
-                                        time.sleep(1)
-                                        st.rerun()
-                                    else:
-                                        st.error(f"关闭失败: {res['msg']}")
-                            else:
-                                st.error("无法找到该实例对应的凭证（可能已被删除）。")
+                if instance_to_term and st.button("🛑 关闭实例", type="primary"):
+                    target = next((d for d in display_data if d['Instance ID'] == instance_to_term), None)
+                    if target:
+                        cred = cred_lookup.get(target['_cred_id'])
+                        if cred:
+                            terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term)
+                            update_instance_status(instance_to_term, "shutting-down")
+                            st.success("已关闭")
+                            time.sleep(1)
+                            st.rerun()
+
+# ====================
+# TAB 4: Billing Center
+# ====================
+with tab_billing:
+    st.header("💳 会员中心")
+    
+    col_bal, col_daily = st.columns(2)
+    
+    with col_bal:
+        st.metric("当前余额", f"${balance:.4f}")
+        
+        with st.expander("充值 (模拟)", expanded=True):
+            amount = st.number_input("充值金额 ($)", min_value=1.0, value=10.0, step=1.0)
+            if st.button("确认充值"):
+                if add_balance(user.id, amount, "用户充值"):
+                    st.success(f"成功充值 ${amount}！")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("充值失败")
+
+    with col_daily:
+        daily_est = calculate_daily_cost(user.id)
+        st.metric("预计每日消耗", f"${daily_est:.4f}")
+        st.caption("包含基础费 + 实例维护费 + 增值服务费")
+        
+        if st.button("手动触发日结 (测试用)"):
+            process_daily_billing(user.id)
+            st.success("结算完成")
+            time.sleep(1)
+            st.rerun()
+
+    st.subheader("收费标准")
+    st.markdown(f"""
+    - **基础费用**: ${BASE_DAILY_FEE} / 天 (仅当绑定了AWS账号时收取)
+    - **EC2 实例托管**: ${EC2_INSTANCE_FEE} / 个 / 天
+    - **GFW 自动检测**: ${GFW_CHECK_FEE} / 个 / 天 (即将上线)
+    - **Lightsail 实例**: ${LIGHTSAIL_INSTANCE_FEE} / 个 / 天
+    
+    > ℹ️ 余额为 0 时将停止自动替补与深度检测服务。
+    """)

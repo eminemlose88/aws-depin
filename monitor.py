@@ -2,6 +2,7 @@ import paramiko
 import io
 import time
 import base64
+import socket
 
 def check_instance_process(ip, private_key_str, project_name):
     """
@@ -119,3 +120,17 @@ def install_project_via_ssh(ip, private_key_str, script_base64):
 
     except Exception as e:
         return {"status": "error", "msg": f"SSH Execution Failed: {str(e)}"}
+
+def check_gfw_status(ip, port=22, timeout=3):
+    """
+    Check if IP:Port is reachable (TCP Ping).
+    Returns: True (Accessible), False (Blocked/Down)
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((ip, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
