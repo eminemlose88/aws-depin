@@ -9,7 +9,7 @@ DISCORD_API_BASE = "https://discord.com/api/v9"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 # Configuration
-CHANNEL_ID = "1016643264627916800" # Shardeum Faucet Channel
+CHANNEL_ID = "1423751569454661632" # Shardeum Faucet Channel
 # Update: Fallback to Shardeum Faucet Channel ID if changed.
 # The user's screenshot shows 404 Unknown Channel, implying the channel ID might be wrong or the bot has no access.
 # However, the user provided ID 1016643264627916800.

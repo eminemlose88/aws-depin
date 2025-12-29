@@ -943,3 +943,58 @@ with tab_tools:
                     
             except Exception as e:
                 st.error(f"启动失败: {e}")
+
+    st.divider()
+    
+    st.subheader("Discord 批量加群")
+    st.markdown("使用上方的 `Discord Tokens` 和 `代理列表` 批量加入指定的 Discord 服务器。")
+    
+    invite_code = st.text_input("邀请码 / 链接 (如: shardeum 或 https://discord.gg/shardeum)", placeholder="shardeum")
+    
+    if st.button("🚀 开始批量加群"):
+        if not f_tokens: # Check tokens from the section above
+             st.error("请先在上方填写 Discord Tokens")
+        elif not invite_code:
+             st.error("请填写邀请码")
+        else:
+             # Ensure files are saved (using content from the inputs above)
+             with open("discord_tokens.txt", "w", encoding="utf-8") as f:
+                f.write(f_tokens.strip())
+             if f_proxies.strip():
+                with open("proxies.txt", "w", encoding="utf-8") as f:
+                    f.write(f_proxies.strip())
+             
+             import subprocess
+             import sys
+             
+             st.info(f"正在加入服务器: {invite_code} ...")
+             
+             try:
+                 process = subprocess.Popen(
+                    [sys.executable, "discord_joiner.py", invite_code],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                 )
+                 
+                 log_placeholder_join = st.empty()
+                 full_log_join = ""
+                 
+                 while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+                    if line:
+                        full_log_join += line
+                        display_log = "\n".join(full_log_join.split("\n")[-20:])
+                        log_placeholder_join.code(display_log, language="bash")
+                 
+                 if process.returncode == 0:
+                    st.success("批量加群任务结束！")
+                 else:
+                    st.error("任务异常退出")
+                    
+             except Exception as e:
+                 st.error(f"启动失败: {e}")
