@@ -47,8 +47,8 @@ def sign_in(email, password):
             
             # Save session to cookies (expires in 7 days)
             if response.session:
-                cookie_manager.set('supabase_access_token', response.session.access_token, expires_at=datetime.now() + timedelta(days=7))
-                cookie_manager.set('supabase_refresh_token', response.session.refresh_token, expires_at=datetime.now() + timedelta(days=7))
+                cookie_manager.set('supabase_access_token', response.session.access_token, expires_at=datetime.now() + timedelta(days=7), key="set_access_token")
+                cookie_manager.set('supabase_refresh_token', response.session.refresh_token, expires_at=datetime.now() + timedelta(days=7), key="set_refresh_token")
             
             # Fetch User Role
             try:
