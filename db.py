@@ -160,12 +160,18 @@ def update_credential_status(cred_id, status, limit=None, used=None):
         if limit is not None: data["vcpu_limit"] = limit
         if used is not None: data["vcpu_used"] = used
         
-        client.table("aws_credentials") \
+        res = client.table("aws_credentials") \
             .update(data) \
             .eq("id", cred_id) \
             .execute()
+        
+        # Debug output
+        if not res.data:
+            print(f"Warning: No rows updated for cred_id {cred_id}")
+            
     except Exception as e:
         print(f"Error updating credential status: {e}")
+        st.error(f"DB Update Error: {e}")
 
 # --- Instance Management ---
 

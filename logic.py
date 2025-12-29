@@ -59,12 +59,22 @@ def get_current_usage(ak, sk, region, proxy_url=None):
         total_vcpus = 0
         for r in response['Reservations']:
             for i in r['Instances']:
-                # t2.micro / t3.micro has 1 vCPU. 
-                # Ideally we describe instance types, but for now we assume 1 for micro or fetch if possible.
-                # 'CpuOptions' usually has 'CoreCount' * 'ThreadsPerCore'
-                # Simplification: t2/t3.micro = 1. 
-                # If we want accuracy:
-                total_vcpus += 1 # Most DePIN nodes use 1 vCPU instances
+                # Calculate vCPU based on CpuOptions (CoreCount * ThreadsPerCore)
+                # or fallback to safe defaults for known types if missing
+                vcpus = 1
+                if 'CpuOptions' in i:
+                    core_count = i['CpuOptions'].get('CoreCount', 1)
+                    threads_per_core = i['CpuOptions'].get('ThreadsPerCore', 1)
+                    vcpus = core_count * threads_per_core
+                else:
+                    # Fallback heuristic
+                    itype = i.get('InstanceType', 't2.micro')
+                    if 'xlarge' in itype: vcpus = 4
+                    elif 'large' in itype: vcpus = 2
+                    elif 'medium' in itype: vcpus = 2
+                    else: vcpus = 1
+                
+                total_vcpus += vcpus
                 
         return total_vcpus
     except Exception:
