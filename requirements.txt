@@ -2,3 +2,5 @@ streamlit
 boto3
 supabase
 cryptography
+paramiko
+pandas
