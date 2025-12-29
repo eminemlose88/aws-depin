@@ -102,18 +102,19 @@ def launch_instance(ak, sk, region, user_data, project_name):
 
         # 3. Launch instance
         # t2.micro, auto-assign public IP, bind the new key pair
+        # FIX: Cannot specify both SecurityGroupIds AND NetworkInterfaces.Groups
+        # We remove SecurityGroupIds and only use NetworkInterfaces.Groups
         response = ec2.run_instances(
             ImageId=ami_id,
             InstanceType='t2.micro',
             MinCount=1,
             MaxCount=1,
             KeyName=key_name, # Bind the key
-            SecurityGroupIds=[sg_id], # Bind the Security Group
             UserData=user_data,
             NetworkInterfaces=[{
                 'DeviceIndex': 0,
                 'AssociatePublicIpAddress': True,
-                'Groups': [sg_id] # Must specify groups here if using NetworkInterfaces
+                'Groups': [sg_id] # Bind Security Group HERE
             }],
             TagSpecifications=[{
                 'ResourceType': 'instance',
