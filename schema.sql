@@ -2,13 +2,15 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 2. 创建 AWS 凭证表 (AWS Credentials)
--- 允许一个用户绑定多个 AWS AKa
+-- 允许一个用户绑定多个 AWS AK
 CREATE TABLE IF NOT EXISTS aws_credentials (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     alias_name TEXT, -- 给这个 AK 起个名字，比如 "公司账号", "个人测试"
     access_key_id TEXT NOT NULL,
     secret_access_key TEXT NOT NULL, -- 注意：生产环境建议加密存储，这里简化处理
+    status TEXT DEFAULT 'active', -- 账号状态: active, suspended, error
+    last_checked TIMESTAMP WITH TIME ZONE, -- 最后检查时间
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
     UNIQUE(user_id, access_key_id)
 );
@@ -46,6 +48,9 @@ CREATE POLICY "Users can view own credentials" ON aws_credentials
 
 CREATE POLICY "Users can insert own credentials" ON aws_credentials
     FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own credentials" ON aws_credentials
+    FOR UPDATE USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can delete own credentials" ON aws_credentials
     FOR DELETE USING (auth.uid() = user_id);

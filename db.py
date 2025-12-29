@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 from supabase import create_client, Client
+from datetime import datetime
 
 # Initialize Supabase client
 # Try to get credentials from environment variables first, then from streamlit secrets
@@ -55,7 +56,8 @@ def add_aws_credential(user_id, alias, ak, sk):
             "user_id": user_id,
             "alias_name": alias,
             "access_key_id": ak.strip(),
-            "secret_access_key": sk.strip()
+            "secret_access_key": sk.strip(),
+            "status": "active" # Default status
         }
         response = supabase.table("aws_credentials").insert(data).execute()
         return response.data
@@ -71,6 +73,7 @@ def get_user_credentials(user_id):
         response = supabase.table("aws_credentials") \
             .select("*") \
             .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
             .execute()
         return response.data
     except Exception as e:
@@ -85,6 +88,21 @@ def delete_aws_credential(cred_id):
         supabase.table("aws_credentials").delete().eq("id", cred_id).execute()
     except Exception as e:
         print(f"Error deleting credential: {e}")
+
+def update_credential_status(cred_id, status):
+    """Update the health status of a credential."""
+    if not supabase: return
+    
+    try:
+        supabase.table("aws_credentials") \
+            .update({
+                "status": status,
+                "last_checked": datetime.utcnow().isoformat()
+            }) \
+            .eq("id", cred_id) \
+            .execute()
+    except Exception as e:
+        print(f"Error updating credential status: {e}")
 
 # --- Instance Management ---
 

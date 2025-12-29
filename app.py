@@ -2,9 +2,9 @@ import streamlit as st
 import json
 import os
 import pandas as pd
-from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances
+from logic import launch_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health
 from templates import PROJECT_REGISTRY, generate_script
-from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status
 from auth import login_page, get_current_user, sign_out
 
 # Set page configuration
@@ -61,7 +61,25 @@ default_project = config.get('project', list(PROJECT_REGISTRY.keys())[0])
 # ====================
 with tab_creds:
     st.header("AWS 凭证管理")
-    st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
+    
+    col_add, col_check = st.columns([3, 1])
+    with col_add:
+        st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
+    with col_check:
+        if st.button("🏥 一键体检", help="检查所有账号的可用状态"):
+            with st.spinner("正在检查所有账号健康状态..."):
+                creds = get_user_credentials(user.id)
+                if not creds:
+                    st.warning("无账号可检查")
+                else:
+                    for cred in creds:
+                        res = check_account_health(cred['access_key_id'], cred['secret_access_key'])
+                        update_credential_status(cred['id'], res['status'])
+                        if res['status'] != 'active':
+                            st.toast(f"{cred['alias_name']}: {res['msg']}", icon="⚠️")
+                    st.success("检查完成！")
+                    time.sleep(1)
+                    st.rerun()
 
     # Add new credential
     with st.expander("➕ 添加新凭证", expanded=False):
@@ -86,14 +104,29 @@ with tab_creds:
     if creds:
         st.subheader("已保存的凭证")
         for cred in creds:
-            col1, col2, col3, col4 = st.columns([2, 3, 2, 1])
+            col1, col2, col3, col4, col5 = st.columns([2, 3, 1, 2, 1])
             with col1:
                 st.markdown(f"**{cred['alias_name']}**")
             with col2:
                 st.code(cred['access_key_id'])
             with col3:
-                st.caption(f"添加于: {cred['created_at'][:10]}")
+                # Status Badge
+                status = cred.get('status', 'active')
+                if status == 'active':
+                    st.markdown("🟢 正常")
+                elif status == 'suspended':
+                    st.markdown("🔴 封禁/验证")
+                elif status == 'error':
+                    st.markdown("⚠️ 错误")
+                else:
+                    st.markdown(f"⚪ {status}")
             with col4:
+                last_checked = cred.get('last_checked')
+                if last_checked:
+                    st.caption(f"检查于: {last_checked[:16].replace('T', ' ')}")
+                else:
+                    st.caption("从未检查")
+            with col5:
                 if st.button("🗑️", key=f"del_{cred['id']}", help="删除此凭证"):
                     delete_aws_credential(cred['id'])
                     st.rerun()
@@ -133,9 +166,15 @@ with tab_deploy:
         st.subheader("1. 选择账号与项目")
         
         # Select Credential
+        # Filter only active credentials ideally, or show warning
         cred_options = {c['alias_name']: c for c in creds}
         selected_alias = st.selectbox("选择 AWS 账号", list(cred_options.keys()))
         selected_cred = cred_options[selected_alias]
+        
+        if selected_cred.get('status') == 'suspended':
+            st.error("⚠️ 该账号已被标记为封禁/欠费，部署可能会失败！")
+        elif selected_cred.get('status') == 'error':
+            st.warning("⚠️ 该账号上次检查报错，请确认凭证是否有效。")
 
         st.subheader("2. 配置项目参数")
         project_info = PROJECT_REGISTRY[project_name]
@@ -233,6 +272,13 @@ with tab_manage:
                 status_text.text("正在初始化全网扫描...")
                 
                 for cred in creds:
+                    # Skip suspended accounts to save time/errors
+                    if cred.get('status') == 'suspended':
+                        status_text.text(f"跳过封禁账号: {cred['alias_name']}...")
+                        current_step += len(AMI_MAPPING)
+                        progress_bar.progress(min(current_step / total_steps, 1.0))
+                        continue
+
                     for region_code in AMI_MAPPING.keys():
                         current_step += 1
                         progress = current_step / total_steps
@@ -285,6 +331,10 @@ with tab_manage:
             
             for c_id, regions in batch_map.items():
                 cred = cred_lookup[c_id]
+                # Skip suspended accounts check
+                if cred.get('status') == 'suspended':
+                    continue
+                    
                 for r, i_ids in regions.items():
                     # Call AWS
                     status_dict = get_instance_status(
@@ -299,17 +349,21 @@ with tab_manage:
             display_data = []
             for inst in db_instances:
                 i_id = inst['instance_id']
+                cred_info = inst.get('aws_credentials', {})
+                cred_status = cred_info.get('status', 'active') if cred_info else 'active'
                 
                 # Determine status
-                # If we couldn't fetch (e.g. cred deleted), keep old status or mark unknown
-                current_status = real_time_status.get(i_id, inst['status'])
+                # If we couldn't fetch (e.g. cred deleted or suspended), keep old status or mark unknown
+                if cred_status == 'suspended':
+                    current_status = "account-suspended"
+                else:
+                    current_status = real_time_status.get(i_id, inst['status'])
                 
                 # If AWS says 'terminated' but DB says 'active', update DB
-                if current_status != inst['status']:
+                if current_status != inst['status'] and current_status != "account-suspended":
                     update_instance_status(i_id, current_status)
                 
                 # Get alias
-                cred_info = inst.get('aws_credentials', {})
                 alias = cred_info.get('alias_name', 'Unknown/Deleted') if cred_info else 'Unknown'
 
                 display_data.append({
@@ -332,7 +386,7 @@ with tab_manage:
             term_col1, term_col2 = st.columns([3, 1])
             with term_col1:
                 # Filter out already terminated instances
-                active_instances = [d for d in display_data if d['Status'] not in ['terminated', 'shutting-down']]
+                active_instances = [d for d in display_data if d['Status'] not in ['terminated', 'shutting-down', 'account-suspended']]
                 if not active_instances:
                     st.caption("没有活跃实例可操作")
                     instance_to_term = None

@@ -1,5 +1,6 @@
 import boto3
 import time
+from botocore.exceptions import ClientError
 
 # Amazon Linux 2023 AMI IDs (x86_64)
 # Note: These IDs change over time. Users should verify valid AMIs for their region.
@@ -156,5 +157,40 @@ def terminate_instance(ak, sk, region, instance_id):
         ec2.terminate_instances(InstanceIds=[instance_id])
         return {'status': 'success', 'msg': f'Instance {instance_id} terminating...'}
 
+    except Exception as e:
+        return {'status': 'error', 'msg': str(e)}
+
+def check_account_health(ak, sk):
+    """
+    Perform a health check on the AWS account by attempting a lightweight API call (describe_regions).
+    Returns a dict with 'status' (active/suspended/error) and 'msg'.
+    """
+    try:
+        # Use us-east-1 as default for health check
+        session = boto3.Session(
+            aws_access_key_id=ak,
+            aws_secret_access_key=sk,
+            region_name='us-east-1'
+        )
+        ec2 = session.client('ec2')
+        
+        # Try a lightweight call
+        ec2.describe_regions(DryRun=False)
+        
+        return {'status': 'active', 'msg': 'Normal'}
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_msg = e.response['Error']['Message']
+        
+        if error_code == 'AuthFailure':
+            return {'status': 'error', 'msg': 'Invalid Credentials'}
+        elif error_code == 'OptInRequired':
+            return {'status': 'suspended', 'msg': 'Account Pending Verification (OptInRequired)'}
+        elif 'Verification' in error_msg or 'Suspended' in error_msg:
+             return {'status': 'suspended', 'msg': 'Account Suspended'}
+        else:
+             return {'status': 'error', 'msg': f'{error_code}: {error_msg}'}
+             
     except Exception as e:
         return {'status': 'error', 'msg': str(e)}
