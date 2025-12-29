@@ -159,17 +159,17 @@ with tab_creds:
                             # update_credential_status called below with quota info
                             
                             # Quota Check if active
-                        quota_msg = ""
-                        if res['status'] == 'active':
-                            cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region)
-                            quota_msg = f" | 配额: {cap['used']}/{cap['limit']}"
-                            # Update with quota info
-                            update_credential_status(cred['id'], res['status'], limit=cap['limit'], used=cap['used'])
-                        else:
-                            # Update without quota info if not active
-                            update_credential_status(cred['id'], res['status'])
+                            quota_msg = ""
+                            if res['status'] == 'active':
+                                cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region)
+                                quota_msg = f" | 配额: {cap['used']}/{cap['limit']}"
+                                # Update with quota info
+                                update_credential_status(cred['id'], res['status'], limit=cap['limit'], used=cap['used'])
+                            else:
+                                # Update without quota info if not active
+                                update_credential_status(cred['id'], res['status'])
                         
-                        if res['status'] != 'active':
+                            if res['status'] != 'active':
                                 st.toast(f"{cred['alias_name']}: {res['msg']}", icon="⚠️")
                             else:
                                 st.toast(f"{cred['alias_name']}: 正常 {quota_msg}", icon="✅")
