@@ -330,72 +330,72 @@ with tab_deploy:
                 target_creds = [next(c for c in creds if c['id'] == cred_options[label]) for label in selected_cred_labels]
                 
                 progress_bar = st.progress(0)
-                    status_area = st.empty()
-                    results = []
-                    
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                status_area = st.empty()
+                results = []
+                
+                from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                    def launch_worker(cred):
-                        # Quota Check
-                        try:
-                            proxy_url = cred.get('proxy_url')
-                            cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], region, proxy_url=proxy_url)
-                            if cap['available'] < 1:
-                                return f"⚠️ {cred['alias_name']}: 跳过 - 配额不足 (已用 {cap['used']}/{cap['limit']})"
-                        except Exception as e:
-                            pass # Try launch anyway as per original logic
+                def launch_worker(cred):
+                    # Quota Check
+                    try:
+                        proxy_url = cred.get('proxy_url')
+                        cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], region, proxy_url=proxy_url)
+                        if cap['available'] < 1:
+                            return f"⚠️ {cred['alias_name']}: 跳过 - 配额不足 (已用 {cap['used']}/{cap['limit']})"
+                    except Exception as e:
+                        pass # Try launch anyway as per original logic
 
-                        try:
-                            proxy_url = cred.get('proxy_url')
-                            result = launch_base_instance(
-                                cred['access_key_id'],
-                                cred['secret_access_key'],
-                                region,
-                                instance_type=target_instance_type,
-                                image_type=image_type_code,
-                                proxy_url=proxy_url
+                    try:
+                        proxy_url = cred.get('proxy_url')
+                        result = launch_base_instance(
+                            cred['access_key_id'],
+                            cred['secret_access_key'],
+                            region,
+                            instance_type=target_instance_type,
+                            image_type=image_type_code,
+                            proxy_url=proxy_url
+                        )
+                        
+                        if result['status'] == 'success':
+                            log_instance(
+                                user_id=user.id,
+                                credential_id=cred['id'],
+                                instance_id=result['id'],
+                                ip=result['ip'],
+                                region=region,
+                                project_name="Pending",
+                                status="active",
+                                private_key=result.get('private_key')
                             )
-                            
-                            if result['status'] == 'success':
-                                log_instance(
-                                    user_id=user.id,
-                                    credential_id=cred['id'],
-                                    instance_id=result['id'],
-                                    ip=result['ip'],
-                                    region=region,
-                                    project_name="Pending",
-                                    status="active",
-                                    private_key=result.get('private_key')
-                                )
-                                return f"✅ {cred['alias_name']}: 成功 ({result['id']})"
-                            else:
-                                return f"❌ {cred['alias_name']}: 失败 - {result['msg']}"
-                        except Exception as e:
-                            return f"❌ {cred['alias_name']}: 异常 - {str(e)}"
+                            return f"✅ {cred['alias_name']}: 成功 ({result['id']})"
+                        else:
+                            return f"❌ {cred['alias_name']}: 失败 - {result['msg']}"
+                    except Exception as e:
+                        return f"❌ {cred['alias_name']}: 异常 - {str(e)}"
 
-                    with ThreadPoolExecutor(max_workers=10) as executor:
-                        future_to_cred = {executor.submit(launch_worker, cred): cred for cred in target_creds}
-                        
-                        completed_count = 0
-                        total_count = len(target_creds)
-                        
-                        for future in as_completed(future_to_cred):
-                            cred = future_to_cred[future]
-                            try:
-                                res = future.result()
-                                results.append(res)
-                            except Exception as exc:
-                                results.append(f"❌ {cred['alias_name']}: 线程异常 - {str(exc)}")
-                            
-                            completed_count += 1
-                            progress_bar.progress(completed_count / total_count)
-                            status_area.text(f"处理进度: {completed_count}/{total_count}")
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    future_to_cred = {executor.submit(launch_worker, cred): cred for cred in target_creds}
                     
-                    status_area.empty()
-                    st.success("批量操作完成！")
-                    with st.expander("查看详细结果", expanded=True):
-                        for r in results:
-                            st.write(r)
+                    completed_count = 0
+                    total_count = len(target_creds)
+                    
+                    for future in as_completed(future_to_cred):
+                        cred = future_to_cred[future]
+                        try:
+                            res = future.result()
+                            results.append(res)
+                        except Exception as exc:
+                            results.append(f"❌ {cred['alias_name']}: 线程异常 - {str(exc)}")
+                        
+                        completed_count += 1
+                        progress_bar.progress(completed_count / total_count)
+                        status_area.text(f"处理进度: {completed_count}/{total_count}")
+                
+                status_area.empty()
+                st.success("批量操作完成！")
+                with st.expander("查看详细结果", expanded=True):
+                    for r in results:
+                        st.write(r)
 
 # ====================
 # TAB 3: Manage Instances
