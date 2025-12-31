@@ -3,6 +3,7 @@ import json
 import os
 import pandas as pd
 import time
+import extra_streamlit_components as stx
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_project
@@ -15,6 +16,9 @@ from admin import admin_dashboard
 
 # Set page configuration
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
+
+# Initialize Cookie Manager (Must be done in the main script flow)
+cookie_manager = stx.CookieManager(key="auth_cookie_manager")
 
 CONFIG_FILE = 'config.json'
 
@@ -38,10 +42,10 @@ def save_config(config_data):
         st.sidebar.error(f"保存失败: {e}")
 
 # Check authentication status
-user = get_current_user()
+user = get_current_user(cookie_manager)
 
 if not user:
-    login_page()
+    login_page(cookie_manager)
     st.stop()
 
 # Force refresh user role from DB to ensure instant admin access after DB update
@@ -80,7 +84,7 @@ if "user_role" in st.session_state and st.session_state["user_role"] == 'admin':
 
 st.sidebar.markdown("---")
 if st.sidebar.button("登出"):
-    sign_out()
+    sign_out(cookie_manager)
     st.rerun()
 
 st.title("AWS DePIN Launcher (Pro)")
