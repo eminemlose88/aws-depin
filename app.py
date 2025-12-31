@@ -689,8 +689,17 @@ with tab_manage:
             with col_params:
                 proj_conf = PROJECT_REGISTRY[target_proj]
                 input_params = {}
+                batch_nexus_wallets = [] # For Nexus special batch handling
+                
                 for p in proj_conf['params']:
-                    input_params[p] = st.text_input(f"{p}", key=f"batch_inst_{p}").strip()
+                    if target_proj == "Nexus_Prover" and p == "wallet_address":
+                         # Special handling for Nexus batch wallets
+                         raw_wallets = st.text_area(f"批量输入 {p} (每行一个)", key=f"batch_inst_{p}", height=150, help="每行一个钱包地址，将自动分配给选中的实例").strip()
+                         if raw_wallets:
+                             batch_nexus_wallets = [line.strip() for line in raw_wallets.split('\n') if line.strip()]
+                         input_params[p] = "BATCH_PLACEHOLDER" # Placeholder
+                    else:
+                        input_params[p] = st.text_input(f"{p}", key=f"batch_inst_{p}").strip()
 
             # Instance Selection
             st.write("选择目标实例:")
@@ -730,7 +739,15 @@ with tab_manage:
                 if not selected_inst_labels:
                     st.error("请选择至少一个实例")
                 else:
-                    # Validate Params
+                    target_ids = [instance_options[l] for l in selected_inst_labels]
+                    
+                    # Validate Nexus Batch Count
+                    if target_proj == "Nexus_Prover" and "wallet_address" in proj_conf['params']:
+                        if len(batch_nexus_wallets) != len(target_ids):
+                            st.error(f"钱包地址数量 ({len(batch_nexus_wallets)}) 与 选中实例数量 ({len(target_ids)}) 不匹配！")
+                            st.stop()
+                    
+                    # Validate Params (Standard)
                     missing_params = [p for p in proj_conf['params'] if not input_params.get(p)]
                     if missing_params:
                         st.error(f"请填写必要参数: {', '.join(missing_params)}")
@@ -739,17 +756,21 @@ with tab_manage:
                         if not allowed:
                             st.error(msg)
                         else:
-                            # Generate script once
-                            script = generate_script(target_proj, **input_params)
-                            
+                            # Generate script loop
                             progress_bar = st.progress(0)
                             status_area = st.empty()
                             results = []
-                            target_ids = [instance_options[l] for l in selected_inst_labels]
                             
                             for i, i_id in enumerate(target_ids):
                                 target_data = next(d for d in display_data if d['Instance ID'] == i_id)
                                 status_area.text(f"Installing on {target_data['IP Address']}...")
+                                
+                                # Prepare Params for this instance
+                                current_params = input_params.copy()
+                                if target_proj == "Nexus_Prover" and batch_nexus_wallets:
+                                    current_params['wallet_address'] = batch_nexus_wallets[i]
+                                
+                                script = generate_script(target_proj, **current_params)
                                 
                                 pkey = get_instance_private_key(i_id)
                                 if pkey:

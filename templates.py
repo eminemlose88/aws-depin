@@ -67,13 +67,13 @@ sudo ./apphub restart
     },
     "Nexus_Prover": {
         "description": "Nexus Prover (Limited to 3 vCPU / 16GB RAM)",
-        "params": ["prover_id"],
+        "params": ["wallet_address"],
         "script_template": """#!/bin/bash
 # Install dependencies
 if [ -f /etc/debian_version ]; then
-    apt-get update && apt-get install -y curl build-essential git
+    apt-get update && apt-get install -y curl build-essential git unzip
 else
-    yum update -y && yum install -y curl git
+    yum update -y && yum install -y curl git unzip
     # Install development tools group for Amazon Linux
     yum groupinstall -y "Development Tools"
 fi
@@ -82,10 +82,35 @@ fi
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 
-# Clone and Build Nexus (Assuming official repo structure)
-# Note: As of late 2024, Nexus usually provides a CLI or script. 
-# Using the standard install command from their docs:
+# Install Nexus CLI
+# Using the official script which installs to ~/.nexus
 curl https://cli.nexus.xyz/ | sh
+
+# Wait for install
+sleep 10
+
+# Locate CLI Binary
+# User suggested path: $HOME/.nexus/nexus-cli
+# Default official path: $HOME/.nexus/bin/prover
+if [ -f "$HOME/.nexus/nexus-cli" ]; then
+    CLI_PATH="$HOME/.nexus/nexus-cli"
+elif [ -f "$HOME/.nexus/bin/prover" ]; then
+    CLI_PATH="$HOME/.nexus/bin/prover"
+elif [ -f "/root/.nexus/bin/prover" ]; then
+    CLI_PATH="/root/.nexus/bin/prover"
+else
+    # Fallback search
+    CLI_PATH=$(find $HOME/.nexus -name "prover" -o -name "nexus-cli" | head -n 1)
+fi
+
+echo "Using Nexus CLI at: $CLI_PATH"
+
+# Auto Register with Wallet
+# Note: Using non-interactive mode if supported, or passing arguments directly
+if [ -n "$CLI_PATH" ]; then
+    # Register command provided by user
+    $CLI_PATH beta-program:cli:register --wallet-address "{wallet_address}" || $CLI_PATH register-user --wallet-address "{wallet_address}" || echo "Registration command failed or not supported in this version, proceeding to start..."
+fi
 
 # Configure Systemd Service with Limits
 cat <<EOF > /etc/systemd/system/nexus-prover.service
@@ -96,7 +121,8 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/root/.nexus/bin/prover start --id {prover_id}
+Environment=NONINTERACTIVE=1
+ExecStart=$CLI_PATH start
 Restart=always
 RestartSec=5
 # Resource Limits
