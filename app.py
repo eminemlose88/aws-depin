@@ -180,11 +180,11 @@ with tab_creds:
                             
                             progress_bar.progress((i + 1) / len(creds))
                             
-                        st.success("检查完成！")
-                        # Clear cache to force reload
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
+                    st.success("检查完成！")
+                    # Clear cache to force reload
+                    st.cache_data.clear()
+                    time.sleep(1)
+                    st.rerun()
 
     # Add new credential (Single)
     with st.expander("➕ 添加单条凭证", expanded=False):
