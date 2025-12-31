@@ -708,9 +708,9 @@ with tab_manage:
             filtered_ready_instances = []
             
             for d in ssh_ready_instances:
-                # 1. Deduplication: Hide if already has a project (not Pending/Unknown)
-                if d['Project'] not in ['Pending', 'Unknown']:
-                    continue
+                # 1. Deduplication REMOVED: Allow multi-project install
+                # if d['Project'] not in ['Pending', 'Unknown']:
+                #    continue
                     
                 # 2. Requirements Check
                 i_type = d.get('Type', 'N/A')
@@ -726,9 +726,9 @@ with tab_manage:
                 filtered_ready_instances.append(d)
             
             if not filtered_ready_instances:
-                st.warning("没有符合条件的空闲实例 (可能所有实例已安装项目，或硬件规格不满足要求)")
+                st.warning("没有符合条件的空闲实例 (可能硬件规格不满足要求)")
             
-            instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Type']} - {d['Account']}": d['Instance ID'] for d in filtered_ready_instances}
+            instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Type']} - {d['Account']} - [{d['Project']}]": d['Instance ID'] for d in filtered_ready_instances}
             selected_inst_labels = st.multiselect(
                 "勾选实例",
                 options=list(instance_options.keys()),

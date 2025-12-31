@@ -1,1 +1,0 @@
-ALTER TABLE aws_credentials ADD COLUMN IF NOT EXISTS proxy_url TEXT;

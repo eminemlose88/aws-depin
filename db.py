@@ -75,18 +75,6 @@ def check_db_connection():
     try:
         # Try to select 1 row to check if table exists
         client.table("instances").select("id").limit(1).execute()
-        
-        # Also check for new schema columns in aws_credentials
-        try:
-            client.table("aws_credentials").select("vcpu_limit").limit(1).execute()
-        except Exception as e:
-             if "does not exist" in str(e):
-                 st.error("🚨 数据库架构需要更新！(缺少 vCPU 配额字段)")
-                 st.warning("请在 Supabase SQL Editor 中运行 `update_quota_schema.sql` 的内容。")
-                 with open("update_quota_schema.sql", "r", encoding="utf-8") as f:
-                     st.code(f.read(), language="sql")
-                 return False
-                 
         return True
     except Exception as e:
         # Check if error contains "relation" and "does not exist"
@@ -102,7 +90,7 @@ def check_db_connection():
 
 # --- AWS Credentials Management ---
 
-def add_aws_credential(user_id, alias, ak, sk, proxy_url=None):
+def add_aws_credential(user_id, alias, ak, sk):
     """Add a new AWS credential for the user."""
     client = get_supabase()
     if not client: return None
@@ -113,8 +101,7 @@ def add_aws_credential(user_id, alias, ak, sk, proxy_url=None):
             "alias_name": alias,
             "access_key_id": ak.strip(),
             "secret_access_key": sk.strip(),
-            "status": "active", # Default status
-            "proxy_url": proxy_url.strip() if proxy_url else None
+            "status": "active" # Default status
         }
         response = client.table("aws_credentials").insert(data).execute()
         return response.data
@@ -161,18 +148,12 @@ def update_credential_status(cred_id, status, limit=None, used=None):
         if limit is not None: data["vcpu_limit"] = limit
         if used is not None: data["vcpu_used"] = used
         
-        res = client.table("aws_credentials") \
+        client.table("aws_credentials") \
             .update(data) \
             .eq("id", cred_id) \
             .execute()
-        
-        # Debug output
-        if not res.data:
-            print(f"Warning: No rows updated for cred_id {cred_id}")
-            
     except Exception as e:
         print(f"Error updating credential status: {e}")
-        st.error(f"DB Update Error: {e}")
 
 # --- Instance Management ---
 
