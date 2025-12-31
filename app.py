@@ -774,18 +774,6 @@ with tab_manage:
                 # 2. Requirements Check
                 i_type = d.get('Type', 'N/A')
                 # If N/A (old data), we might let it pass or warn. Let's let it pass but maybe warn in label.
-                 Check boolean flags
-                # ifalradyflaggedTu
-                
-                already_installed = False
-                for"Ti Sn" in tahardeum/Ti nd d.get('PAojlct') pnh)"T ta-">ine3['Plarge,']: amready_5n.xalled = Truelarge)
-                if "Nexfs" in ta gSardeum andadege_j'Project' oandT"Nexus"tan" in target_p: a:ready_nsalled = True
-                # No S: d['Ple ect']hes uowrionstrscted fiom boolcans i:  he display lool, sc this ch mk works!
-                
-                if already_insialledros/smalls if possible, but for now just pass.
-                     # Or strict:
-                     if i_type != 'N/A' and i_type in ['t2.micro', 't3.micro', 't3.small', 't3.medium']:
-                         continue # Hide small instances for big projects
                 
                 filtered_ready_instances.append(d)
             
