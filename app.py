@@ -708,9 +708,14 @@ with tab_manage:
             filtered_ready_instances = []
             
             for d in ssh_ready_instances:
-                # 1. Deduplication REMOVED: Allow multi-project install
-                # if d['Project'] not in ['Pending', 'Unknown']:
-                #    continue
+                # 1. Smart Deduplication: Prevent re-installing the SAME project
+                # Check if target_proj is already in the comma-separated project list
+                current_projects = [p.strip() for p in d['Project'].split(',')]
+                if target_proj in current_projects:
+                    continue
+                
+                # 1b. Special Case: Treat "Titan Network" and "Titan_Network" as same if needed
+                # (Not strictly needed if names match registry keys exactly)
                     
                 # 2. Requirements Check
                 i_type = d.get('Type', 'N/A')

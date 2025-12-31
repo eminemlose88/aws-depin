@@ -245,15 +245,33 @@ def update_instance_status(instance_id, new_status):
 def update_instance_project(instance_id, project_name):
     """
     Update the project name of an instance in the database.
+    Appends the new project name if it doesn't exist, comma-separated.
     """
     client = get_supabase()
     if not client: return
     try:
-        client.table("instances") \
-            .update({"project_name": project_name}) \
-            .eq("instance_id", instance_id) \
-            .execute()
-        print(f"Updated instance {instance_id} project to {project_name}")
+        # 1. Fetch current project name
+        res = client.table("instances").select("project_name").eq("instance_id", instance_id).single().execute()
+        current_name = res.data.get("project_name", "") if res.data else ""
+        
+        # 2. Determine new name
+        if not current_name or current_name in ["Pending", "Unknown"]:
+            new_name = project_name
+        else:
+            # Check if already exists
+            current_list = [p.strip() for p in current_name.split(',')]
+            if project_name in current_list:
+                new_name = current_name # No change
+            else:
+                new_name = f"{current_name}, {project_name}"
+        
+        # 3. Update
+        if new_name != current_name:
+            client.table("instances") \
+                .update({"project_name": new_name}) \
+                .eq("instance_id", instance_id) \
+                .execute()
+            print(f"Updated instance {instance_id} project to {new_name}")
     except Exception as e:
         print(f"Error updating instance project: {e}")
 

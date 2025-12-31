@@ -111,6 +111,7 @@ def detect_installed_project(ip, private_key_str):
     """
     Connect via SSH and detect if any known project is running.
     Returns: (project_name: str | None, msg: str)
+    Returns comma-separated string if multiple found.
     """
     if not ip or not private_key_str:
         return None, "Missing IP or Private Key"
@@ -131,49 +132,56 @@ def detect_installed_project(ip, private_key_str):
     try:
         client.connect(hostname=ip, username='ec2-user', pkey=pkey, timeout=10)
         
+        found_projects = []
+        msgs = []
+
         # 1. Check for Shardeum (Dashboard Container)
         stdin, stdout, stderr = client.exec_command("sudo docker ps --format '{{.Names}}' | grep shardeum-dashboard")
         if stdout.read().decode().strip():
-            client.close()
-            return "Shardeum_Titan_Combo", "Shardeum Dashboard found"
+            found_projects.append("Shardeum_Titan_Combo")
+            msgs.append("Shardeum")
 
         # 2. Check for Babylon (System Service)
         stdin, stdout, stderr = client.exec_command("systemctl is-active babylond")
         if stdout.read().decode().strip() == "active":
-             client.close()
-             return "Babylon_Traffmonetizer_Combo", "Babylon Service active"
+             found_projects.append("Babylon_Traffmonetizer_Combo")
+             msgs.append("Babylon")
 
         # 3. Check for Nexus (System Service)
         stdin, stdout, stderr = client.exec_command("systemctl is-active nexus-prover")
         if stdout.read().decode().strip() == "active":
-             client.close()
-             return "Nexus_Prover", "Nexus Service active"
+             found_projects.append("Nexus_Prover")
+             msgs.append("Nexus")
 
         # 4. Check for Titan Network (Docker container 'titan-edge')
         stdin, stdout, stderr = client.exec_command("sudo docker ps --format '{{.Names}}' | grep titan-edge")
         if stdout.read().decode().strip():
-            client.close()
-            return "Titan Network", "Titan container running"
+            found_projects.append("Titan Network")
+            msgs.append("Titan")
             
         # 5. Check for Meson / GagaNode (Process 'gaganode')
         stdin, stdout, stderr = client.exec_command("pgrep -f gaganode")
         if stdout.read().decode().strip():
-            client.close()
-            return "Meson (GagaNode)", "GagaNode process running"
+            found_projects.append("Meson (GagaNode)")
+            msgs.append("Meson")
 
         # 6. Check for Dante Proxy (Service 'sockd')
         stdin, stdout, stderr = client.exec_command("systemctl is-active sockd")
         if stdout.read().decode().strip() == "active":
-             client.close()
-             return "Dante_Socks5_Proxy", "Dante Proxy active"
+             found_projects.append("Dante_Socks5_Proxy")
+             msgs.append("Dante")
 
         # 7. Check for Squid HTTP Proxy (Service 'squid')
         stdin, stdout, stderr = client.exec_command("systemctl is-active squid")
         if stdout.read().decode().strip() == "active":
-             client.close()
-             return "Squid_HTTP_Proxy", "Squid Proxy active"
+             found_projects.append("Squid_HTTP_Proxy")
+             msgs.append("Squid")
             
         client.close()
+        
+        if found_projects:
+            return ", ".join(found_projects), f"Found: {', '.join(msgs)}"
+        
         return None, "No known project detected"
 
     except Exception as e:
