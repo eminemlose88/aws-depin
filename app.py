@@ -8,6 +8,7 @@ from logic import launch_base_instance, AMI_MAPPING, get_instance_status, termin
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_project
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status
+from billing import get_user_profile, add_balance, calculate_daily_cost, process_daily_billing, BASE_DAILY_FEE, EC2_INSTANCE_FEE, GFW_CHECK_FEE, LIGHTSAIL_INSTANCE_FEE
 from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
 
