@@ -102,8 +102,8 @@ with tab_creds:
     
     # 1.1 Batch Import Section
     with st.expander("📥 批量导入凭证", expanded=False):
-        st.caption("格式：`备注, AccessKey, SecretKey` (每行一个，使用英文逗号分隔)")
-        batch_input = st.text_area("粘贴凭证列表", height=150, placeholder="Account1, AKIA..., wJalr...\nAccount2, AKIA..., 8klM...")
+        st.caption("格式：`备注, AccessKey, SecretKey, Proxy(可选)` (每行一个，使用英文逗号分隔)")
+        batch_input = st.text_area("粘贴凭证列表", height=150, placeholder="Account1, AKIA..., wJalr..., http://user:pass@ip:port\nAccount2, AKIA..., 8klM...")
         
         if st.button("开始批量导入"):
             if not batch_input.strip():
@@ -120,7 +120,8 @@ with tab_creds:
                         parts = [p.strip() for p in line.split(',')]
                         if len(parts) >= 3:
                             alias, ak, sk = parts[0], parts[1], parts[2]
-                            if add_aws_credential(user.id, alias, ak, sk):
+                            proxy = parts[3] if len(parts) > 3 else None
+                            if add_aws_credential(user.id, alias, ak, sk, proxy):
                                 success_count += 1
                             else:
                                 fail_count += 1
@@ -155,13 +156,14 @@ with tab_creds:
                         progress_bar = st.progress(0)
                         for i, cred in enumerate(creds):
                             # Basic Health Check
-                            res = check_account_health(cred['access_key_id'], cred['secret_access_key'])
+                            proxy_url = cred.get('proxy_url')
+                            res = check_account_health(cred['access_key_id'], cred['secret_access_key'], proxy_url=proxy_url)
                             # update_credential_status called below with quota info
                             
                             # Quota Check if active
                             quota_msg = ""
                             if res['status'] == 'active':
-                                cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region)
+                                cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region, proxy_url=proxy_url)
                                 quota_msg = f" | 配额: {cap['used']}/{cap['limit']}"
                                 # Update with quota info
                                 update_credential_status(cred['id'], res['status'], limit=cap['limit'], used=cap['used'])
@@ -188,12 +190,13 @@ with tab_creds:
             alias = st.text_input("备注名称 (如: 公司测试号)", placeholder="My AWS Account")
             ak = st.text_input("Access Key ID", type="password")
             sk = st.text_input("Secret Access Key", type="password")
+            proxy = st.text_input("代理地址 (可选)", placeholder="http://user:pass@ip:port")
             submitted = st.form_submit_button("保存凭证")
             if submitted:
                 if not alias or not ak or not sk:
                     st.error("请填写完整信息")
                 else:
-                    res = add_aws_credential(user.id, alias, ak, sk)
+                    res = add_aws_credential(user.id, alias, ak, sk, proxy)
                     if res:
                         st.success("凭证添加成功！")
                         st.rerun()
@@ -337,7 +340,9 @@ with tab_deploy:
                         
                         # Quota Check
                         try:
-                            cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], region)
+                            # Pass proxy_url from credential
+                            proxy_url = cred.get('proxy_url')
+                            cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], region, proxy_url=proxy_url)
                             if cap['available'] < 1:
                                 results.append(f"⚠️ {cred['alias_name']}: 跳过 - 配额不足 (已用 {cap['used']}/{cap['limit']})")
                                 progress_bar.progress((i + 1) / len(target_creds))
@@ -348,12 +353,14 @@ with tab_deploy:
                         
                         status_area.text(f"正在启动: {cred['alias_name']}...")
                         try:
+                            proxy_url = cred.get('proxy_url')
                             result = launch_base_instance(
                                 cred['access_key_id'],
                                 cred['secret_access_key'],
                                 region,
                                 instance_type=target_instance_type,
-                                image_type=image_type_code
+                                image_type=image_type_code,
+                                proxy_url=proxy_url
                             )
                             
                             if result['status'] == 'success':
@@ -467,10 +474,12 @@ with tab_manage:
                             progress_bar.progress(progress)
                             status_text.text(f"Scanning: {cred['alias_name']} - {region_code}...")
                             
+                            proxy_url = cred.get('proxy_url')
                             aws_instances = scan_all_instances(
                                 cred['access_key_id'], 
                                 cred['secret_access_key'], 
-                                region_code
+                                region_code,
+                                proxy_url=proxy_url
                             )
                             
                             if aws_instances:
@@ -513,7 +522,8 @@ with tab_manage:
                     cred = cred_lookup[c_id]
                     if cred.get('status') == 'suspended': continue
                     for r, i_ids in regions.items():
-                        status_dict = get_instance_status(cred['access_key_id'], cred['secret_access_key'], r, i_ids)
+                        proxy_url = cred.get('proxy_url')
+                        status_dict = get_instance_status(cred['access_key_id'], cred['secret_access_key'], r, i_ids, proxy_url=proxy_url)
                         real_time_status.update(status_dict)
                 
                 display_data = []
@@ -786,7 +796,8 @@ with tab_manage:
             if target:
                 cred = cred_lookup.get(target['_cred_id'])
                 if cred:
-                        terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term)
+                        proxy_url = cred.get('proxy_url')
+                        terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term, proxy_url=proxy_url)
                         update_instance_status(instance_to_term, "shutting-down")
                         # Clear cache
                         if "display_data" in st.session_state:

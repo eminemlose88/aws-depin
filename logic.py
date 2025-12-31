@@ -151,7 +151,7 @@ def launch_base_instance(ak, sk, region, instance_type='t2.micro', image_type='a
     ami_id = None
     if image_type == 'ubuntu':
         if region not in AMI_MAPPING_UBUNTU:
-             return {'status': 'error', 'msg': f'Region {region} not supported for Ubuntu.'}
+            return {'status': 'error', 'msg': f'Region {region} not supported for Ubuntu.'}
         ami_id = AMI_MAPPING_UBUNTU[region]
         user_name = "ubuntu"
     else:
