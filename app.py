@@ -258,25 +258,50 @@ with tab_deploy:
 
         st.subheader("启动基础实例 (Base Instance)")
         
-        # 2.0 Launch Mode Selection
+        # 2.0 Launch Mode Selection (Custom Only)
         st.write("配置实例规格:")
-        launch_mode = st.radio(
-            "启动模式", 
-            ["标准 (Standard)", "Alpha 舰队 (高内存)", "Beta 舰队 (存储/内存)", "自定义 (Custom)"],
-            help="Alpha: r5.large (16GB RAM) | Beta: m5.large (8GB RAM) | Standard: t2.micro"
-        )
         
-        target_instance_type = 't2.micro'
-        if "Alpha" in launch_mode:
-            target_instance_type = 'r5.large'
-        elif "Beta" in launch_mode:
-            target_instance_type = 'm5.large'
-        elif "自定义" in launch_mode:
-            target_instance_type = st.selectbox(
-                "选择实例类型",
-                ['t2.micro', 't3.medium', 't3.large', 't3.xlarge', 'm5.large', 'm5.xlarge', 'r5.large', 'r5.xlarge', 'c5.large', 'c5.xlarge']
-            )
+        col_cpu, col_mem, col_fam, col_os = st.columns(4)
+        
+        with col_cpu:
+            cpu_cores = st.selectbox("CPU 核数", [1, 2, 4, 8, 16, 32, 48, 64], index=1)
+            
+        with col_mem:
+            mem_size = st.selectbox("内存大小 (GB)", [1, 2, 4, 8, 16, 32, 64, 128], index=2)
+            
+        with col_fam:
+            fam_type = st.selectbox("实例系列", ["通用型 (T/M)", "计算型 (C)", "内存型 (R)"], index=0)
+            
+        with col_os:
+            os_type = st.selectbox("操作系统", ["Amazon Linux 2023", "Ubuntu 22.04 LTS"], index=0)
 
+        # Logic to determine instance type
+        target_instance_type = 't2.micro' # Default fallback
+        
+        # Simple mapping logic
+        if fam_type == "通用型 (T/M)":
+            if cpu_cores == 1 and mem_size == 1: target_instance_type = 't2.micro'
+            elif cpu_cores == 2 and mem_size == 4: target_instance_type = 't3.medium'
+            elif cpu_cores == 2 and mem_size == 8: target_instance_type = 'm5.large'
+            elif cpu_cores == 4 and mem_size == 16: target_instance_type = 'm5.xlarge'
+            elif cpu_cores == 8 and mem_size == 32: target_instance_type = 'm5.2xlarge'
+            else: target_instance_type = 'm5.large' # Fallback
+            
+        elif fam_type == "计算型 (C)":
+            if cpu_cores == 2 and mem_size == 4: target_instance_type = 'c5.large'
+            elif cpu_cores == 4 and mem_size == 8: target_instance_type = 'c5.xlarge'
+            elif cpu_cores == 8 and mem_size == 16: target_instance_type = 'c5.2xlarge'
+            else: target_instance_type = 'c5.large'
+            
+        elif fam_type == "内存型 (R)":
+            if cpu_cores == 2 and mem_size == 16: target_instance_type = 'r5.large'
+            elif cpu_cores == 4 and mem_size == 32: target_instance_type = 'r5.xlarge'
+            else: target_instance_type = 'r5.large'
+
+        st.caption(f"匹配到的实例类型: **{target_instance_type}**")
+        
+        image_type_code = 'al2023' if "Amazon" in os_type else 'ubuntu'
+        
         # 2.1 Batch Launch Selection
         st.write("选择要部署的 AWS 账号 (可多选):")
         
@@ -327,7 +352,8 @@ with tab_deploy:
                                 cred['access_key_id'],
                                 cred['secret_access_key'],
                                 region,
-                                instance_type=target_instance_type
+                                instance_type=target_instance_type,
+                                image_type=image_type_code
                             )
                             
                             if result['status'] == 'success':

@@ -44,6 +44,109 @@ sudo ./apps/gaganode/gaganode config set --token={token}
 # Restart to apply changes
 sudo ./apphub restart
 """
+    },
+    "Nexus_Prover": {
+        "description": "Nexus Prover (Limited to 3 vCPU / 16GB RAM)",
+        "params": ["prover_id"],
+        "script_template": """#!/bin/bash
+# Install dependencies
+if [ -f /etc/debian_version ]; then
+    apt-get update && apt-get install -y curl build-essential git
+else
+    yum update -y && yum install -y curl git
+    # Install development tools group for Amazon Linux
+    yum groupinstall -y "Development Tools"
+fi
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source $HOME/.cargo/env
+
+# Clone and Build Nexus (Assuming official repo structure)
+# Note: As of late 2024, Nexus usually provides a CLI or script. 
+# Using the standard install command from their docs:
+curl https://cli.nexus.xyz/ | sh
+
+# Configure Systemd Service with Limits
+cat <<EOF > /etc/systemd/system/nexus-prover.service
+[Unit]
+Description=Nexus Prover Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/root/.nexus/bin/prover start --id {prover_id}
+Restart=always
+RestartSec=5
+# Resource Limits
+CPUQuota=300%
+MemoryLimit=16G
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and Start
+systemctl daemon-reload
+systemctl enable nexus-prover
+systemctl start nexus-prover
+"""
+    },
+    "Nillion_Verifier": {
+        "description": "Nillion Verifier (Docker, Limited to 8GB RAM)",
+        "params": ["verifier_key"], 
+        "script_template": """#!/bin/bash
+# Ensure Docker is ready
+systemctl start docker
+
+# Pull Image
+docker pull nillion/verifier:v1.0.1
+
+# Run with Memory Limit
+# Note: Adjust volume mapping as needed for your key file structure
+# Here we assume the key is passed directly or handled via env for simplicity in this template
+# In production, you'd likely mount a config file.
+docker run -d --restart always --name nillion-verifier \\
+  --memory="8g" \\
+  -e VERIFIER_PRIVATE_KEY="{verifier_key}" \\
+  nillion/verifier:v1.0.1 verify --rpc-endpoint "https://testnet-nillion-rpc.nillion-network.xyz"
+"""
+    },
+    "Rivalz_rNode": {
+        "description": "Rivalz rNode (Docker, Limited to 4GB RAM)",
+        "params": ["wallet_address"],
+        "script_template": """#!/bin/bash
+# Ensure Docker is ready
+systemctl start docker
+
+# Pull Image
+docker pull rivalz/rnode:latest
+
+# Run with Memory Limit
+docker run -d --restart always --name rivalz-node \\
+  --memory="4g" \\
+  -e WALLET_ADDRESS="{wallet_address}" \\
+  rivalz/rnode:latest
+"""
+    },
+    "Hemera_T3rn": {
+        "description": "Hemera / T3rn Executor (Docker, Limited to 2GB RAM)",
+        "params": ["private_key"],
+        "script_template": """#!/bin/bash
+# Ensure Docker is ready
+systemctl start docker
+
+# Pull Image (Example image, check official docs for latest)
+docker pull t3rn/executor:latest
+
+# Run with Memory Limit
+docker run -d --restart always --name t3rn-executor \\
+  --memory="2g" \\
+  -e PRIVATE_KEY_EXPORT="{private_key}" \\
+  -e NODE_ENV="testnet" \\
+  t3rn/executor:latest
+"""
     }
 }
 

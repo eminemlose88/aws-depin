@@ -12,6 +12,14 @@ AMI_MAPPING = {
     'ap-northeast-1': 'ami-012261b9035f8f938'
 }
 
+# Ubuntu 22.04 LTS AMI IDs (x86_64)
+AMI_MAPPING_UBUNTU = {
+    'us-east-1': 'ami-0c7217cdde317cfec',
+    'us-east-2': 'ami-05fb0b8c1424f266b',
+    'us-west-2': 'ami-008fe2fc65df48dac',
+    'ap-northeast-1': 'ami-0270a6a090e4a3225'
+}
+
 def get_vcpu_quota(ak, sk, region, proxy_url=None):
     """
     Get the vCPU quota for 'Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances'.
@@ -135,15 +143,23 @@ def ensure_security_group(ec2_client):
                 return None
         return None
 
-def launch_base_instance(ak, sk, region, instance_type='t2.micro', proxy_url=None):
+def launch_base_instance(ak, sk, region, instance_type='t2.micro', image_type='al2023', proxy_url=None):
     """
     Step 1: Launch a base EC2 instance (Pure OS).
     Returns: {status, ip, id, private_key, msg}
     """
-    if region not in AMI_MAPPING:
-        return {'status': 'error', 'msg': f'Region {region} not supported.'}
+    ami_id = None
+    if image_type == 'ubuntu':
+        if region not in AMI_MAPPING_UBUNTU:
+             return {'status': 'error', 'msg': f'Region {region} not supported for Ubuntu.'}
+        ami_id = AMI_MAPPING_UBUNTU[region]
+        user_name = "ubuntu"
+    else:
+        if region not in AMI_MAPPING:
+            return {'status': 'error', 'msg': f'Region {region} not supported for Amazon Linux.'}
+        ami_id = AMI_MAPPING[region]
+        user_name = "ec2-user"
 
-    ami_id = AMI_MAPPING[region]
     config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
 
     try:
@@ -167,7 +183,17 @@ def launch_base_instance(ak, sk, region, instance_type='t2.micro', proxy_url=Non
 
         # 3. Launch instance
         # UserData to install basic tools (Docker, SSM Agent)
-        base_user_data = """#!/bin/bash
+        # Adapt for Ubuntu vs AL2023
+        if image_type == 'ubuntu':
+            base_user_data = """#!/bin/bash
+apt-get update -y
+apt-get install -y docker.io
+systemctl start docker
+systemctl enable docker
+usermod -aG docker ubuntu
+"""
+        else:
+            base_user_data = """#!/bin/bash
 yum update -y
 yum install -y docker
 service docker start
