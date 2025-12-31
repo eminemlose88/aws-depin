@@ -687,7 +687,26 @@ with tab_manage:
                                             res = install_project_via_ssh(target_info['IP Address'], pkey, script)
                                             
                                             if res['status'] == 'success':
-                                                2)targetproj
+                                                # Map target_proj to keys
+                                                db_key = ""
+                                                if "Titan" in target_proj: db_key = "Titan"
+                                                elif "Nexus" in target_proj: db_key = "Nexus"
+                                                elif "Shardeum" in target_proj: db_key = "Shardeum"
+                                                elif "Babylon" in target_proj: db_key = "Babylon"
+                                                elif "Meson" in target_proj: db_key = "Meson"
+                                                elif "Gaga" in target_proj: db_key = "Meson"
+                                                
+                                                if db_key:
+                                                    update_instance_projects_status(selected_ssh_instance, [db_key])
+                                                
+                                                st.success(f"安装指令已发送！")
+                                                # Clear cache
+                                                if "display_data" in st.session_state:
+                                                    del st.session_state["display_data"]
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                st.error(f"安装失败: {res['msg']}")
                         if st.button("🔍 深度检测"):
                              # Balance Check
                             allowed, msg = check_balance(user.id)
