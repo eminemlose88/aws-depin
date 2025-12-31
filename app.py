@@ -18,7 +18,7 @@ from admin import admin_dashboard
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
 
 # Initialize Cookie Manager (Must be done in the main script flow)
-cookie_manager = stx.CookieManager(key="auth_cookie_manager")
+# cookie_manager = stx.CookieManager(key="auth_cookie_manager")
 
 CONFIG_FILE = 'config.json'
 
@@ -42,10 +42,10 @@ def save_config(config_data):
         st.sidebar.error(f"保存失败: {e}")
 
 # Check authentication status
-user = get_current_user(cookie_manager)
+user = get_current_user()
 
 if not user:
-    login_page(cookie_manager)
+    login_page()
     st.stop()
 
 # Force refresh user role from DB to ensure instant admin access after DB update
@@ -84,7 +84,7 @@ if "user_role" in st.session_state and st.session_state["user_role"] == 'admin':
 
 st.sidebar.markdown("---")
 if st.sidebar.button("登出"):
-    sign_out(cookie_manager)
+    sign_out()
     st.rerun()
 
 st.title("AWS DePIN Launcher (Pro)")
