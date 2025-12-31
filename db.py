@@ -161,6 +161,7 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
     """
     Log instance details to Supabase 'instances' table with user_id association.
     Encodes private key if provided.
+    (Updated to support boolean project columns initialization)
     """
     client = get_supabase()
     if not client:
@@ -169,6 +170,17 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
 
     encrypted_key = encrypt_key(private_key) if private_key else None
 
+    # Parse initial project name to set booleans
+    p_name = project_name or "Pending"
+    
+    # Initialize booleans based on project_name input (for backward compatibility / initial install)
+    is_titan = "Titan" in p_name
+    is_nexus = "Nexus" in p_name
+    is_shardeum = "Shardeum" in p_name
+    is_babylon = "Babylon" in p_name
+    is_meson = "Meson" in p_name or "GagaNode" in p_name
+    is_proxy = "Proxy" in p_name or "Dante" in p_name or "Squid" in p_name
+
     try:
         data = {
             "user_id": user_id,
@@ -176,9 +188,15 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
             "instance_id": instance_id,
             "ip_address": ip,
             "region": region,
-            "project_name": project_name,
+            # "project_name": project_name, # DEPRECATED
             "status": status,
-            "private_key": encrypted_key
+            "private_key": encrypted_key,
+            "proj_titan": is_titan,
+            "proj_nexus": is_nexus,
+            "proj_shardeum": is_shardeum,
+            "proj_babylon": is_babylon,
+            "proj_meson": is_meson,
+            "proj_proxy": is_proxy
         }
         client.table("instances").insert(data).execute()
         print(f"Logged instance {instance_id} to database.")
@@ -189,6 +207,7 @@ def get_user_instances(user_id):
     """
     Retrieve all instances associated with a specific User ID.
     Order by created_at descending.
+    Fetches boolean project columns.
     """
     client = get_supabase()
     if not client:
@@ -196,7 +215,7 @@ def get_user_instances(user_id):
 
     try:
         # Fetch instances and join with aws_credentials to get alias name if needed
-        # Supabase-py join syntax can be tricky, simple select first
+        # Explicitly select columns to ensure we get the new booleans
         response = client.table("instances") \
             .select("*, aws_credentials(alias_name, access_key_id)") \
             .eq("user_id", user_id) \

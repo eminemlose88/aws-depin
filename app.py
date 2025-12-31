@@ -551,9 +551,21 @@ with tab_manage:
                     alias = cred_info.get('alias_name', 'Unknown') if cred_info else 'Unknown'
                     health = inst.get('health_status', 'Unknown')
 
+                    # Construct Project string dynamically from booleans
+                    active_projects = []
+                    if inst.get('proj_titan'): active_projects.append("Titan")
+                    if inst.get('proj_nexus'): active_projects.append("Nexus")
+                    if inst.get('proj_shardeum'): active_projects.append("Shardeum")
+                    if inst.get('proj_babylon'): active_projects.append("Babylon")
+                    if inst.get('proj_meson'): active_projects.append("Meson")
+                    if inst.get('proj_proxy'): active_projects.append("Proxy")
+                    
+                    # Fallback to legacy or pending if no booleans set
+                    project_display = ", ".join(active_projects) if active_projects else (inst.get('project_name') or "Pending")
+
                     display_data.append({
                         "Account": alias,
-                        "Project": inst['project_name'],
+                        "Project": project_display,
                         "Instance ID": i_id,
                         "IP Address": inst['ip_address'],
                         "Region": inst['region'],
@@ -640,19 +652,7 @@ with tab_manage:
                                             res = install_project_via_ssh(target_info['IP Address'], pkey, script)
                                             
                                             if res['status'] == 'success':
-                                                update_instance_project(selected_ssh_instance, target_proj)
-                                                # Clear cache
-                                                if "display_data" in st.session_state:
-                                                    del st.session_state["display_data"]
-                                                st.success(f"安装指令已发送！")
-                                                st.info("请稍后刷新查看状态。")
-                                                with st.expander("查看输出"):
-                                                    st.code(res['output'])
-                                            else:
-                                                st.error(f"安装失败: {res['msg']}")
-
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
+                                                2)targetproj
                         if st.button("🔍 深度检测"):
                              # Balance Check
                             allowed, msg = check_balance(user.id)
@@ -720,10 +720,15 @@ with tab_manage:
                 # 2. Requirements Check
                 i_type = d.get('Type', 'N/A')
                 # If N/A (old data), we might let it pass or warn. Let's let it pass but maybe warn in label.
+                 Check boolean flags
+                # ifalradyflaggedTu
                 
-                # Check for Shardeum/Titan (Alpha) -> Need ~16GB (r5, t3.xlarge, m5.xlarge)
-                if "Shardeum" in target_proj or "Titan" in target_proj:
-                     # Simple heuristic: Block micros/smalls if possible, but for now just pass.
+                already_installed = False
+                for"Ti Sn" in tahardeum/Ti nd d.get('PAojlct') pnh)"T ta-">ine3['Plarge,']: amready_5n.xalled = Truelarge)
+                if "Nexfs" in ta gSardeum andadege_j'Project' oandT"Nexus"tan" in target_p: a:ready_nsalled = True
+                # No S: d['Ple ect']hes uowrionstrscted fiom boolcans i:  he display lool, sc this ch mk works!
+                
+                if already_insialledros/smalls if possible, but for now just pass.
                      # Or strict:
                      if i_type != 'N/A' and i_type in ['t2.micro', 't3.micro', 't3.small', 't3.medium']:
                          continue # Hide small instances for big projects
@@ -781,7 +786,14 @@ with tab_manage:
                                 if pkey:
                                     res = install_project_via_ssh(target_data['IP Address'], pkey, script)
                                     if res['status'] == 'success':
-                                        update_instance_project(i_id, target_proj)
+                                        # Map target_proj to keys
+                                        db_key = ""
+                                        if "Titan" in target_proj: db_key = "Titan"
+                                        elif "Nexus" in target_proj: db_key = "Nexus"
+                                        
+                                        if db_key:
+                                            update_instance_projects_status(i_id, [db_key])
+                                            
                                         results.append(f"✅ {target_data['IP Address']}: 指令已发送")
                                     else:
                                         results.append(f"❌ {target_data['IP Address']}: {res['msg']}")
