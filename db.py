@@ -316,6 +316,7 @@ def sync_instances(user_id, credential_id, region, aws_instances):
     """
     Sync AWS instances with database records.
     aws_instances: List of dicts from scan_all_instances
+    Optimized: Uses batch insert for new instances.
     """
     client = get_supabase()
     if not client: return {"new": 0, "updated": 0}
@@ -335,37 +336,49 @@ def sync_instances(user_id, credential_id, region, aws_instances):
         return stats
 
     aws_map = {i['instance_id']: i for i in aws_instances}
+    
+    new_instances_data = []
 
-    # 2. Process AWS instances (New & Update)
+    # 2. Process AWS instances (Collect New & Update Existing)
     for aws_id, aws_info in aws_map.items():
         aws_status = aws_info['status']
         
         if aws_id not in db_map:
-            # Found NEW instance
+            # Found NEW instance - Add to batch list
             if aws_status != 'terminated': # Don't import terminated instances
-                try:
-                    data = {
-                        "user_id": user_id,
-                        "credential_id": credential_id,
-                        "instance_id": aws_id,
-                        "ip_address": aws_info['ip_address'],
-                        "region": region,
-                        "project_name": aws_info['project_name'],
-                        "status": aws_status
-                    }
-                    client.table("instances").insert(data).execute()
-                    stats["new"] += 1
-                except Exception as e:
-                    print(f"Error importing instance {aws_id}: {e}")
+                # Initialize booleans (default False)
+                # For newly discovered instances via sync, we don't know the project yet unless we probe.
+                # So we leave them False.
+                new_instances_data.append({
+                    "user_id": user_id,
+                    "credential_id": credential_id,
+                    "instance_id": aws_id,
+                    "ip_address": aws_info['ip_address'],
+                    "region": region,
+                    # "project_name": aws_info['project_name'], # DEPRECATED
+                    "status": aws_status,
+                    "proj_titan": False,
+                    "proj_nexus": False,
+                    "proj_shardeum": False,
+                    "proj_babylon": False,
+                    "proj_meson": False,
+                    "proj_proxy": False
+                })
         
         elif db_map[aws_id] != aws_status:
-            # Status changed
+            # Status changed - Update immediately (Batch update harder without unique constraint on instance_id)
             update_instance_status(aws_id, aws_status)
             stats["updated"] += 1
 
-    # 3. Process Missing instances (Mark as Terminated)
-    # If in DB (and not terminated) but NOT in AWS list -> likely terminated long ago or region mismatch
-    # (Note: describe_instances usually returns terminated instances for a short while, then they disappear)
+    # 3. Batch Insert New Instances
+    if new_instances_data:
+        try:
+            client.table("instances").insert(new_instances_data).execute()
+            stats["new"] += len(new_instances_data)
+        except Exception as e:
+            print(f"Error batch importing instances: {e}")
+
+    # 4. Process Missing instances (Mark as Terminated)
     for db_id, db_status in db_map.items():
         if db_id not in aws_map and db_status != 'terminated':
             update_instance_status(db_id, 'terminated')

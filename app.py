@@ -7,14 +7,14 @@ import extra_streamlit_components as stx
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_project
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status
 from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
-from billing import check_balance, get_user_profile, add_balance, process_daily_billing, calculate_daily_cost, BASE_DAILY_FEE, EC2_INSTANCE_FEE, LIGHTSAIL_INSTANCE_FEE, GFW_CHECK_FEE
 
 # Import Admin Dashboard
 from admin import admin_dashboard
 
-# Set page configuration
+from admin import admin_dashboard
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
 
 # Initialize Cookie Manager (Must be done in the main script flow)
@@ -343,23 +343,18 @@ with tab_deploy:
                     status_area = st.empty()
                     results = []
                     
-                    for i, cred in enumerate(target_creds):
-                        status_area.text(f"正在检查配额: {cred['alias_name']}...")
-                        
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                    def launch_worker(cred):
                         # Quota Check
                         try:
-                            # Pass proxy_url from credential
                             proxy_url = cred.get('proxy_url')
                             cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], region, proxy_url=proxy_url)
                             if cap['available'] < 1:
-                                results.append(f"⚠️ {cred['alias_name']}: 跳过 - 配额不足 (已用 {cap['used']}/{cap['limit']})")
-                                progress_bar.progress((i + 1) / len(target_creds))
-                                continue
+                                return f"⚠️ {cred['alias_name']}: 跳过 - 配额不足 (已用 {cap['used']}/{cap['limit']})"
                         except Exception as e:
-                            results.append(f"⚠️ {cred['alias_name']}: 配额检查失败 - {e}")
-                            # Optionally continue or skip? Continue but risky. Let's try to launch.
-                        
-                        status_area.text(f"正在启动: {cred['alias_name']}...")
+                            pass # Try launch anyway as per original logic
+
                         try:
                             proxy_url = cred.get('proxy_url')
                             result = launch_base_instance(
@@ -382,13 +377,29 @@ with tab_deploy:
                                     status="active",
                                     private_key=result.get('private_key')
                                 )
-                                results.append(f"✅ {cred['alias_name']}: 成功 ({result['id']})")
+                                return f"✅ {cred['alias_name']}: 成功 ({result['id']})"
                             else:
-                                results.append(f"❌ {cred['alias_name']}: 失败 - {result['msg']}")
+                                return f"❌ {cred['alias_name']}: 失败 - {result['msg']}"
                         except Exception as e:
-                            results.append(f"❌ {cred['alias_name']}: 异常 - {str(e)}")
+                            return f"❌ {cred['alias_name']}: 异常 - {str(e)}"
+
+                    with ThreadPoolExecutor(max_workers=10) as executor:
+                        future_to_cred = {executor.submit(launch_worker, cred): cred for cred in target_creds}
+                        
+                        completed_count = 0
+                        total_count = len(target_creds)
+                        
+                        for future in as_completed(future_to_cred):
+                            cred = future_to_cred[future]
+                            try:
+                                res = future.result()
+                                results.append(res)
+                            except Exception as exc:
+                                results.append(f"❌ {cred['alias_name']}: 线程异常 - {str(exc)}")
                             
-                        progress_bar.progress((i + 1) / len(target_creds))
+                            completed_count += 1
+                            progress_bar.progress(completed_count / total_count)
+                            status_area.text(f"处理进度: {completed_count}/{total_count}")
                     
                     status_area.empty()
                     st.success("批量操作完成！")
@@ -409,7 +420,7 @@ with tab_manage:
             if "display_data" in st.session_state:
                 del st.session_state["display_data"]
             
-            with st.spinner("正在进行全量深度检查..."):
+            with st.spinner("正在进行全量深度检查 (并发优化版)..."):
                 # 1. Fetch current instances from DB
                 current_instances = get_user_instances(user.id)
                 
@@ -421,33 +432,57 @@ with tab_manage:
                     time.sleep(1)
                     st.rerun()
                 else:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    for idx, inst in enumerate(targets):
-                        status_text.text(f"Checking {inst['ip_address']} ({inst['project_name']})...")
-                        
-                        # SSH Check
-                        pkey = get_instance_private_key(inst['instance_id'])
-                        if pkey:
-                            # 1. Auto-detect project if Pending or forcing refresh
-                            detected_proj, det_msg = detect_installed_project(inst['ip_address'], pkey)
+                    # Function to process single instance
+                    def process_instance(inst):
+                        try:
+                            # Use local decryption to save DB call
+                            pkey_str = None
+                            if inst.get('private_key'):
+                                try:
+                                    pkey_str = decrypt_key(inst['private_key'])
+                                except:
+                                    return (inst['ip_address'], "Key Decrypt Fail")
                             
-                            if detected_proj:
-                                # If we detected a project and it's different from DB (or DB is Pending), update it
-                                if detected_proj != inst['project_name']:
-                                    update_instance_project(inst['instance_id'], detected_proj)
-                                    inst['project_name'] = detected_proj # Update local var for next check
-                                    st.toast(f"Detected {detected_proj} on {inst['ip_address']}", icon="✅")
-                            
-                            # 2. Check health based on (possibly updated) project
-                            is_healthy, msg = check_instance_process(inst['ip_address'], pkey, inst['project_name'])
-                            new_health = "Healthy" if is_healthy else f"Error: {msg}"
-                        else:
-                            new_health = "Error: Missing Private Key"
+                            if pkey_str:
+                                # 1. Auto-detect project
+                                detected_projs, det_msg = detect_installed_project(inst['ip_address'], pkey_str)
+                                
+                                if detected_projs:
+                                    update_instance_projects_status(inst['instance_id'], detected_projs)
+                                
+                                # 2. Check health
+                                check_str = ", ".join(detected_projs) if detected_projs else (inst.get('project_name') or "")
+                                is_healthy, msg = check_instance_process(inst['ip_address'], pkey_str, check_str)
+                                new_health = "Healthy" if is_healthy else f"Error: {msg}"
+                                update_instance_health(inst['instance_id'], new_health)
+                                return (inst['ip_address'], "Done")
+                            else:
+                                update_instance_health(inst['instance_id'], "Error: Missing Private Key")
+                                return (inst['ip_address'], "No Key")
+                        except Exception as e:
+                            return (inst['ip_address'], f"Ex: {str(e)}")
+
+                    # Use ThreadPoolExecutor for parallel execution
+                    total = len(targets)
+                    completed = 0
+                    
+                    with ThreadPoolExecutor(max_workers=10) as executor:
+                        future_to_ip = {executor.submit(process_instance, inst): inst['ip_address'] for inst in targets}
                         
-                        update_instance_health(inst['instance_id'], new_health)
-                        progress_bar.progress((idx + 1) / len(targets))
+                        for future in as_completed(future_to_ip):
+                            ip = future_to_ip[future]
+                            try:
+                                res_ip, res_msg = future.result()
+                                status_text.text(f"Checked {res_ip}: {res_msg}")
+                            except Exception as exc:
+                                status_text.text(f"Error checking {ip}: {exc}")
+                            
+                            completed += 1
+                            progress_bar.progress(completed / total)
                     
                     status_text.empty()
                     st.success("深度检查完成！")
@@ -771,36 +806,61 @@ with tab_manage:
                             status_area = st.empty()
                             results = []
                             
-                            for i, i_id in enumerate(target_ids):
-                                target_data = next(d for d in display_data if d['Instance ID'] == i_id)
-                                status_area.text(f"Installing on {target_data['IP Address']}...")
-                                
-                                # Prepare Params for this instance
-                                current_params = input_params.copy()
-                                if target_proj == "Nexus_Prover" and batch_nexus_wallets:
-                                    current_params['wallet_address'] = batch_nexus_wallets[i]
-                                
-                                script = generate_script(target_proj, **current_params)
-                                
-                                pkey = get_instance_private_key(i_id)
-                                if pkey:
-                                    res = install_project_via_ssh(target_data['IP Address'], pkey, script)
-                                    if res['status'] == 'success':
-                                        # Map target_proj to keys
-                                        db_key = ""
-                                        if "Titan" in target_proj: db_key = "Titan"
-                                        elif "Nexus" in target_proj: db_key = "Nexus"
-                                        
-                                        if db_key:
-                                            update_instance_projects_status(i_id, [db_key])
+                            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                            def install_worker(i_id, target_data, current_params):
+                                try:
+                                    script = generate_script(target_proj, **current_params)
+                                    pkey = get_instance_private_key(i_id)
+                                    
+                                    if pkey:
+                                        res = install_project_via_ssh(target_data['IP Address'], pkey, script)
+                                        if res['status'] == 'success':
+                                            # Map target_proj to keys
+                                            db_key = ""
+                                            if "Titan" in target_proj: db_key = "Titan"
+                                            elif "Nexus" in target_proj: db_key = "Nexus"
+                                            elif "Shardeum" in target_proj: db_key = "Shardeum"
+                                            elif "Babylon" in target_proj: db_key = "Babylon"
+                                            elif "Meson" in target_proj: db_key = "Meson"
+                                            elif "Gaga" in target_proj: db_key = "Meson"
                                             
-                                        results.append(f"✅ {target_data['IP Address']}: 指令已发送")
+                                            if db_key:
+                                                update_instance_projects_status(i_id, [db_key])
+                                                
+                                            return f"✅ {target_data['IP Address']}: 指令已发送"
+                                        else:
+                                            return f"❌ {target_data['IP Address']}: {res['msg']}"
                                     else:
-                                        results.append(f"❌ {target_data['IP Address']}: {res['msg']}")
-                                else:
-                                    results.append(f"❌ {target_data['IP Address']}: 无法获取私钥")
+                                        return f"❌ {target_data['IP Address']}: 无法获取私钥"
+                                except Exception as e:
+                                    return f"❌ {target_data['IP Address']}: 异常 - {str(e)}"
+
+                            with ThreadPoolExecutor(max_workers=20) as executor:
+                                futures = []
+                                for i, i_id in enumerate(target_ids):
+                                    target_data = next(d for d in display_data if d['Instance ID'] == i_id)
+                                    
+                                    # Prepare Params
+                                    current_params = input_params.copy()
+                                    if target_proj == "Nexus_Prover" and batch_nexus_wallets:
+                                        current_params['wallet_address'] = batch_nexus_wallets[i]
+                                    
+                                    futures.append(executor.submit(install_worker, i_id, target_data, current_params))
                                 
-                                progress_bar.progress((i + 1) / len(target_ids))
+                                completed_count = 0
+                                total_count = len(target_ids)
+
+                                for future in as_completed(futures):
+                                    try:
+                                        res_msg = future.result()
+                                        results.append(res_msg)
+                                    except Exception as exc:
+                                        results.append(f"❌ (Unknown): 线程异常 - {exc}")
+                                    
+                                    completed_count += 1
+                                    progress_bar.progress(completed_count / total_count)
+                                    status_area.text(f"安装进度: {completed_count}/{total_count}")
                             
                             status_area.empty()
                             # Clear cache
