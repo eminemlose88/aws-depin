@@ -46,6 +46,16 @@ def check_instance_process(ip, private_key_str, project_name):
              else:
                  client.close()
                  return False, f"Service 'babylond' is {output}"
+        elif "Nexus" in project_name:
+             # Nexus runs as a systemd service
+             stdin, stdout, stderr = client.exec_command("systemctl is-active nexus-prover")
+             output = stdout.read().decode().strip()
+             if output == "active":
+                 client.close()
+                 return True, "Service 'nexus-prover' is active"
+             else:
+                 client.close()
+                 return False, f"Service 'nexus-prover' is {output}"
         elif "Titan" in project_name:
             target_container = "titan-edge"
         elif "Meson" in project_name:
@@ -133,25 +143,31 @@ def detect_installed_project(ip, private_key_str):
              client.close()
              return "Babylon_Traffmonetizer_Combo", "Babylon Service active"
 
-        # 3. Check for Titan Network (Docker container 'titan-edge')
+        # 3. Check for Nexus (System Service)
+        stdin, stdout, stderr = client.exec_command("systemctl is-active nexus-prover")
+        if stdout.read().decode().strip() == "active":
+             client.close()
+             return "Nexus_Prover", "Nexus Service active"
+
+        # 4. Check for Titan Network (Docker container 'titan-edge')
         stdin, stdout, stderr = client.exec_command("sudo docker ps --format '{{.Names}}' | grep titan-edge")
         if stdout.read().decode().strip():
             client.close()
             return "Titan Network", "Titan container running"
             
-        # 4. Check for Meson / GagaNode (Process 'gaganode')
+        # 5. Check for Meson / GagaNode (Process 'gaganode')
         stdin, stdout, stderr = client.exec_command("pgrep -f gaganode")
         if stdout.read().decode().strip():
             client.close()
             return "Meson (GagaNode)", "GagaNode process running"
 
-        # 5. Check for Dante Proxy (Service 'sockd')
+        # 6. Check for Dante Proxy (Service 'sockd')
         stdin, stdout, stderr = client.exec_command("systemctl is-active sockd")
         if stdout.read().decode().strip() == "active":
              client.close()
              return "Dante_Socks5_Proxy", "Dante Proxy active"
 
-        # 6. Check for Squid HTTP Proxy (Service 'squid')
+        # 7. Check for Squid HTTP Proxy (Service 'squid')
         stdin, stdout, stderr = client.exec_command("systemctl is-active squid")
         if stdout.read().decode().strip() == "active":
              client.close()
