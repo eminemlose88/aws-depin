@@ -486,45 +486,45 @@ with tab_manage:
                 st.error("请先添加 AWS 凭证")
             else:
                 progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    total_steps = len(creds) * len(AMI_MAPPING)
-                    current_step = 0
-                    total_new = 0
-                    total_updated = 0
-                    
-                    for cred in creds:
-                        if cred.get('status') == 'suspended':
-                            current_step += len(AMI_MAPPING)
-                            progress_bar.progress(min(current_step / total_steps, 1.0))
-                            continue
+                status_text = st.empty()
+                total_steps = len(creds) * len(AMI_MAPPING)
+                current_step = 0
+                total_new = 0
+                total_updated = 0
+                
+                for cred in creds:
+                    if cred.get('status') == 'suspended':
+                        current_step += len(AMI_MAPPING)
+                        progress_bar.progress(min(current_step / total_steps, 1.0))
+                        continue
 
-                        for region_code in AMI_MAPPING.keys():
-                            current_step += 1
-                            progress = current_step / total_steps
-                            progress_bar.progress(progress)
-                            status_text.text(f"Scanning: {cred['alias_name']} - {region_code}...")
-                            
-                            proxy_url = cred.get('proxy_url')
-                            aws_instances = scan_all_instances(
-                                cred['access_key_id'], 
-                                cred['secret_access_key'], 
-                                region_code,
-                                proxy_url=proxy_url
-                            )
-                            
-                            if aws_instances:
-                                res = sync_instances(user.id, cred['id'], region_code, aws_instances)
-                                total_new += res['new']
-                                total_updated += res['updated']
-                    
-                    progress_bar.progress(1.0)
-                    status_text.empty()
-                    st.success(f"扫描完成！新增 {total_new}，更新 {total_updated}。")
-                    # Clear cache to reflect new data
-                    if "display_data" in st.session_state:
-                        del st.session_state["display_data"]
-                    time.sleep(2)
-                    st.rerun()
+                    for region_code in AMI_MAPPING.keys():
+                        current_step += 1
+                        progress = current_step / total_steps
+                        progress_bar.progress(progress)
+                        status_text.text(f"Scanning: {cred['alias_name']} - {region_code}...")
+                        
+                        proxy_url = cred.get('proxy_url')
+                        aws_instances = scan_all_instances(
+                            cred['access_key_id'], 
+                            cred['secret_access_key'], 
+                            region_code,
+                            proxy_url=proxy_url
+                        )
+                        
+                        if aws_instances:
+                            res = sync_instances(user.id, cred['id'], region_code, aws_instances)
+                            total_new += res['new']
+                            total_updated += res['updated']
+                
+                progress_bar.progress(1.0)
+                status_text.empty()
+                st.success(f"扫描完成！新增 {total_new}，更新 {total_updated}。")
+                # Clear cache to reflect new data
+                if "display_data" in st.session_state:
+                    del st.session_state["display_data"]
+                time.sleep(2)
+                st.rerun()
 
     # Load data (Cached or Fresh)
     if "display_data" not in st.session_state:
