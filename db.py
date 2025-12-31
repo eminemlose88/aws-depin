@@ -246,6 +246,7 @@ def update_instance_project(instance_id, project_name):
     """
     Update the project name of an instance in the database.
     Appends the new project name if it doesn't exist, comma-separated.
+    Smart merge: Deduplicates entries.
     """
     client = get_supabase()
     if not client: return
@@ -254,16 +255,21 @@ def update_instance_project(instance_id, project_name):
         res = client.table("instances").select("project_name").eq("instance_id", instance_id).single().execute()
         current_name = res.data.get("project_name", "") if res.data else ""
         
-        # 2. Determine new name
+        # 2. Determine new name (Smart Merge)
         if not current_name or current_name in ["Pending", "Unknown"]:
-            new_name = project_name
+            # If current is empty or placeholder, just take the new one
+            # Clean it up first though
+            new_name = ", ".join(sorted(list(set(p.strip() for p in project_name.split(',') if p.strip()))))
         else:
-            # Check if already exists
-            current_list = [p.strip() for p in current_name.split(',')]
-            if project_name in current_list:
-                new_name = current_name # No change
-            else:
-                new_name = f"{current_name}, {project_name}"
+            # Merge logic
+            current_set = set(p.strip() for p in current_name.split(',') if p.strip())
+            new_set = set(p.strip() for p in project_name.split(',') if p.strip())
+            
+            # Union
+            merged_set = current_set.union(new_set)
+            
+            # Sort for consistency
+            new_name = ", ".join(sorted(list(merged_set)))
         
         # 3. Update
         if new_name != current_name:

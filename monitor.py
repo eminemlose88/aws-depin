@@ -54,6 +54,12 @@ def check_instance_process(ip, private_key_str, project_name):
                  client.close()
                  return True, "Service 'nexus-prover' is active"
              else:
+                 # Fallback: Check process (prover binary)
+                 stdin, stdout, stderr = client.exec_command("pgrep -f prover")
+                 if stdout.read().decode().strip():
+                     client.close()
+                     return True, "Process 'prover' is running"
+                 
                  client.close()
                  return False, f"Service 'nexus-prover' is {output}"
         elif "Titan" in project_name:
@@ -152,6 +158,12 @@ def detect_installed_project(ip, private_key_str):
         if stdout.read().decode().strip() == "active":
              found_projects.append("Nexus_Prover")
              msgs.append("Nexus")
+        else:
+             # Fallback: Check process
+             stdin, stdout, stderr = client.exec_command("pgrep -f prover")
+             if stdout.read().decode().strip():
+                 found_projects.append("Nexus_Prover")
+                 msgs.append("Nexus(Proc)")
 
         # 4. Check for Titan Network (Docker container 'titan-edge')
         stdin, stdout, stderr = client.exec_command("sudo docker ps --format '{{.Names}}' | grep titan-edge")
