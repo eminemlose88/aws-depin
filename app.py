@@ -562,13 +562,35 @@ with tab_manage:
                     batch_map[c_id][r].append(inst['instance_id'])
                 
                 real_time_status = {}
-                for c_id, regions in batch_map.items():
-                    cred = cred_lookup[c_id]
-                    if cred.get('status') == 'suspended': continue
-                    for r, i_ids in regions.items():
+                
+                # Parallelize Status Check
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                def fetch_status_worker(c_id, cred, r, i_ids):
+                    try:
                         proxy_url = cred.get('proxy_url')
                         status_dict = get_instance_status(cred['access_key_id'], cred['secret_access_key'], r, i_ids, proxy_url=proxy_url)
-                        real_time_status.update(status_dict)
+                        return status_dict
+                    except Exception as e:
+                        print(f"Error fetching status for {cred.get('alias_name')} in {r}: {e}")
+                        return {}
+
+                with ThreadPoolExecutor(max_workers=20) as executor:
+                    futures = []
+                    for c_id, regions in batch_map.items():
+                        cred = cred_lookup[c_id]
+                        if cred.get('status') == 'suspended': continue
+                        
+                        for r, i_ids in regions.items():
+                            futures.append(executor.submit(fetch_status_worker, c_id, cred, r, i_ids))
+                    
+                    for future in as_completed(futures):
+                        try:
+                            res = future.result()
+                            if res:
+                                real_time_status.update(res)
+                        except Exception:
+                            pass
                 
                 display_data = []
                 for inst in db_instances:
@@ -587,7 +609,7 @@ with tab_manage:
                     alias = cred_info.get('alias_name', 'Unknown') if cred_info else 'Unknown'
                     health = inst.get('health_status', 'Unknown')
 
-                    # Construct Project string dynamically from booleans
+                    # Construct Project string dynamically from booleans (Legacy/Summary)
                     active_projects = []
                     if inst.get('proj_titan'): active_projects.append("Titan")
                     if inst.get('proj_nexus'): active_projects.append("Nexus")
@@ -596,18 +618,23 @@ with tab_manage:
                     if inst.get('proj_meson'): active_projects.append("Meson")
                     if inst.get('proj_proxy'): active_projects.append("Proxy")
                     
-                    # Fallback to legacy or pending if no booleans set
                     project_display = ", ".join(active_projects) if active_projects else (inst.get('project_name') or "Pending")
 
                     display_data.append({
                         "Account": alias,
-                        "Project": project_display,
+                        "Region": inst['region'],
                         "Instance ID": i_id,
                         "IP Address": inst['ip_address'],
-                        "Region": inst['region'],
                         "Status": current_status,
                         "Health": health,
-                        "Type": inst.get('instance_type', 'N/A') if 'instance_type' in inst else 'N/A', # Fallback
+                        "Titan": "✅" if inst.get('proj_titan') else "⬜",
+                        "Nexus": "✅" if inst.get('proj_nexus') else "⬜",
+                        "Shardeum": "✅" if inst.get('proj_shardeum') else "⬜",
+                        "Babylon": "✅" if inst.get('proj_babylon') else "⬜",
+                        "Meson": "✅" if inst.get('proj_meson') else "⬜",
+                        "Proxy": "✅" if inst.get('proj_proxy') else "⬜",
+                        "Project (Summary)": project_display, # Keep as reference
+                        "Type": inst.get('instance_type', 'N/A') if 'instance_type' in inst else 'N/A',
                         "Created": inst['created_at'][:16].replace('T', ' '),
                         "_cred_id": inst['credential_id'],
                         "_has_key": bool(inst.get('private_key'))
