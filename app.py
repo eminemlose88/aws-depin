@@ -927,49 +927,7 @@ with tab_manage:
                         st.rerun()
 
 # ====================
-# TAB 4: Billing Center
-# ====================
-with tab_billing:
-    st.header("💳 会员中心")
-    
-    col_bal, col_daily = st.columns(2)
-    
-    with col_bal:
-        st.metric("当前余额", f"${balance:.4f}")
-        
-        with st.expander("充值 (模拟)", expanded=True):
-            amount = st.number_input("充值金额 ($)", min_value=1.0, value=10.0, step=1.0)
-            if st.button("确认充值"):
-                if add_balance(user.id, amount, "用户充值"):
-                    st.success(f"成功充值 ${amount}！")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("充值失败")
-
-    with col_daily:
-        daily_est = calculate_daily_cost(user.id)
-        st.metric("预计每日消耗", f"${daily_est:.4f}")
-        st.caption("包含基础费 + 实例维护费 + 增值服务费")
-        
-        if st.button("手动触发日结 (测试用)"):
-            process_daily_billing(user.id)
-            st.success("结算完成")
-            time.sleep(1)
-            st.rerun()
-
-    st.subheader("收费标准")
-    st.markdown(f"""
-    - **基础费用**: ${BASE_DAILY_FEE} / 天 (仅当绑定了AWS账号时收取)
-    - **EC2 实例托管**: ${EC2_INSTANCE_FEE} / 个 / 天
-    - **GFW 自动检测**: ${GFW_CHECK_FEE} / 个 / 天 (即将上线)
-    - **Lightsail 实例**: ${LIGHTSAIL_INSTANCE_FEE} / 个 / 天
-    
-    > ℹ️ 余额为 0 时将停止自动替补与深度检测服务。
-    """)
-
-# ====================
-# TAB 5: Toolbox
+# TAB 4: Toolbox
 # ====================
 with tab_tools:
     st.header("🛠️ 实用工具箱")
