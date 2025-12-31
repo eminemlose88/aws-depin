@@ -819,71 +819,71 @@ with tab_manage:
                         progress_bar = st.progress(0)
                         status_area = st.empty()
                         results = []
-                            
-                            from concurrent.futures import ThreadPoolExecutor, as_completed
+                        
+                        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                            def install_worker(i_id, target_data, current_params):
-                                try:
-                                    script = generate_script(target_proj, **current_params)
-                                    pkey = get_instance_private_key(i_id)
-                                    
-                                    if pkey:
-                                        res = install_project_via_ssh(target_data['IP Address'], pkey, script)
-                                        if res['status'] == 'success':
-                                            # Map target_proj to keys
-                                            db_key = ""
-                                            if "Titan" in target_proj: db_key = "Titan"
-                                            elif "Nexus" in target_proj: db_key = "Nexus"
-                                            elif "Shardeum" in target_proj: db_key = "Shardeum"
-                                            elif "Babylon" in target_proj: db_key = "Babylon"
-                                            elif "Meson" in target_proj: db_key = "Meson"
-                                            elif "Gaga" in target_proj: db_key = "Meson"
-                                            
-                                            if db_key:
-                                                update_instance_projects_status(i_id, [db_key])
-                                                
-                                            return f"✅ {target_data['IP Address']}: 指令已发送"
-                                        else:
-                                            return f"❌ {target_data['IP Address']}: {res['msg']}"
-                                    else:
-                                        return f"❌ {target_data['IP Address']}: 无法获取私钥"
-                                except Exception as e:
-                                    return f"❌ {target_data['IP Address']}: 异常 - {str(e)}"
-
-                            with ThreadPoolExecutor(max_workers=20) as executor:
-                                futures = []
-                                for i, i_id in enumerate(target_ids):
-                                    target_data = next(d for d in display_data if d['Instance ID'] == i_id)
-                                    
-                                    # Prepare Params
-                                    current_params = input_params.copy()
-                                    if target_proj == "Nexus_Prover" and batch_nexus_wallets:
-                                        current_params['wallet_address'] = batch_nexus_wallets[i]
-                                    
-                                    futures.append(executor.submit(install_worker, i_id, target_data, current_params))
+                        def install_worker(i_id, target_data, current_params):
+                            try:
+                                script = generate_script(target_proj, **current_params)
+                                pkey = get_instance_private_key(i_id)
                                 
-                                completed_count = 0
-                                total_count = len(target_ids)
+                                if pkey:
+                                    res = install_project_via_ssh(target_data['IP Address'], pkey, script)
+                                    if res['status'] == 'success':
+                                        # Map target_proj to keys
+                                        db_key = ""
+                                        if "Titan" in target_proj: db_key = "Titan"
+                                        elif "Nexus" in target_proj: db_key = "Nexus"
+                                        elif "Shardeum" in target_proj: db_key = "Shardeum"
+                                        elif "Babylon" in target_proj: db_key = "Babylon"
+                                        elif "Meson" in target_proj: db_key = "Meson"
+                                        elif "Gaga" in target_proj: db_key = "Meson"
+                                        
+                                        if db_key:
+                                            update_instance_projects_status(i_id, [db_key])
+                                            
+                                        return f"✅ {target_data['IP Address']}: 指令已发送"
+                                    else:
+                                        return f"❌ {target_data['IP Address']}: {res['msg']}"
+                                else:
+                                    return f"❌ {target_data['IP Address']}: 无法获取私钥"
+                            except Exception as e:
+                                return f"❌ {target_data['IP Address']}: 异常 - {str(e)}"
 
-                                for future in as_completed(futures):
-                                    try:
-                                        res_msg = future.result()
-                                        results.append(res_msg)
-                                    except Exception as exc:
-                                        results.append(f"❌ (Unknown): 线程异常 - {exc}")
-                                    
-                                    completed_count += 1
-                                    progress_bar.progress(completed_count / total_count)
-                                    status_area.text(f"安装进度: {completed_count}/{total_count}")
+                        with ThreadPoolExecutor(max_workers=20) as executor:
+                            futures = []
+                            for i, i_id in enumerate(target_ids):
+                                target_data = next(d for d in display_data if d['Instance ID'] == i_id)
+                                
+                                # Prepare Params
+                                current_params = input_params.copy()
+                                if target_proj == "Nexus_Prover" and batch_nexus_wallets:
+                                    current_params['wallet_address'] = batch_nexus_wallets[i]
+                                
+                                futures.append(executor.submit(install_worker, i_id, target_data, current_params))
                             
-                            status_area.empty()
-                            # Clear cache
-                            if "display_data" in st.session_state:
-                                del st.session_state["display_data"]
-                            st.success("批量安装指令发送完成！")
-                            with st.expander("查看详细结果", expanded=True):
-                                for r in results:
-                                    st.write(r)
+                            completed_count = 0
+                            total_count = len(target_ids)
+
+                            for future in as_completed(futures):
+                                try:
+                                    res_msg = future.result()
+                                    results.append(res_msg)
+                                except Exception as exc:
+                                    results.append(f"❌ (Unknown): 线程异常 - {exc}")
+                                
+                                completed_count += 1
+                                progress_bar.progress(completed_count / total_count)
+                                status_area.text(f"安装进度: {completed_count}/{total_count}")
+                        
+                        status_area.empty()
+                        # Clear cache
+                        if "display_data" in st.session_state:
+                            del st.session_state["display_data"]
+                        st.success("批量安装指令发送完成！")
+                        with st.expander("查看详细结果", expanded=True):
+                            for r in results:
+                                st.write(r)
 
         # Terminate (No balance check needed for cleanup?)
         st.divider()
