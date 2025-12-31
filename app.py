@@ -667,7 +667,7 @@ with tab_manage:
                     
                     filtered_instances = []
                     for d in ssh_ready_instances:
-                        search_str = f"{d['Instance ID']} {d['IP Address']} {d['Project']} {d['Account']}".lower()
+                        search_str = f"{d['Instance ID']} {d['IP Address']} {d['Project (Summary)']} {d['Account']}".lower()
                         if not inst_search_term or inst_search_term in search_str:
                             filtered_instances.append(d)
                             
@@ -678,7 +678,7 @@ with tab_manage:
                         selected_ssh_instance = st.selectbox(
                             f"选择目标实例 (匹配: {len(filtered_instances)})",
                             [d['Instance ID'] for d in filtered_instances],
-                            format_func=lambda x: f"{x} - {next((d['Project'] for d in filtered_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_instances if d['Instance ID'] == x), '')})"
+                            format_func=lambda x: f"{x} - {next((d['Project (Summary)'] for d in filtered_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_instances if d['Instance ID'] == x), '')})"
                         )
 
         with col_actions:
@@ -792,7 +792,7 @@ with tab_manage:
             for d in ssh_ready_instances:
                 # 1. Smart Deduplication: Prevent re-installing the SAME project
                 # Check if target_proj is already in the comma-separated project list
-                current_projects = [p.strip() for p in d['Project'].split(',')]
+                current_projects = [p.strip() for p in d['Project (Summary)'].split(',')]
                 if target_proj in current_projects:
                     continue
                 
@@ -808,7 +808,7 @@ with tab_manage:
             if not filtered_ready_instances:
                 st.warning("没有符合条件的空闲实例 (可能硬件规格不满足要求)")
             
-            instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Type']} - {d['Account']} - [{d['Project']}]": d['Instance ID'] for d in filtered_ready_instances}
+            instance_options = {f"{d['Instance ID']} ({d['IP Address']}) - {d['Type']} - {d['Account']} - [{d['Project (Summary)']}]": d['Instance ID'] for d in filtered_ready_instances}
             selected_inst_labels = st.multiselect(
                 "勾选实例",
                 options=list(instance_options.keys()),
@@ -917,7 +917,7 @@ with tab_manage:
         
         filtered_term_instances = []
         for d in active_instances:
-            search_str = f"{d['Instance ID']} {d['IP Address']} {d['Project']} {d['Account']}".lower()
+            search_str = f"{d['Instance ID']} {d['IP Address']} {d['Project (Summary)']} {d['Account']}".lower()
             if not term_search_term or term_search_term in search_str:
                 filtered_term_instances.append(d)
         
@@ -929,7 +929,7 @@ with tab_manage:
                 f"选择要关闭的实例 (匹配: {len(filtered_term_instances)})", 
                 [d['Instance ID'] for d in filtered_term_instances], 
                 key="term_select",
-                format_func=lambda x: f"{x} - {next((d['Project'] for d in filtered_term_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_term_instances if d['Instance ID'] == x), '')})"
+                format_func=lambda x: f"{x} - {next((d['Project (Summary)'] for d in filtered_term_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_term_instances if d['Instance ID'] == x), '')})"
             ) if filtered_term_instances else None
         
         if instance_to_term and st.button("🛑 关闭实例", type="primary"):
