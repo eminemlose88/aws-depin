@@ -157,6 +157,10 @@ with tab_creds:
                         for i, cred in enumerate(creds):
                             # Basic Health Check
                             proxy_url = cred.get('proxy_url')
+                            # Check if proxy is needed but missing
+                            if not proxy_url:
+                                st.warning(f"⚠️ {cred['alias_name']}: 建议配置代理以提高连接稳定性")
+                            
                             res = check_account_health(cred['access_key_id'], cred['secret_access_key'], proxy_url=proxy_url)
                             # update_credential_status called below with quota info
                             

@@ -5,17 +5,37 @@ PROJECT_REGISTRY = {
         "description": "Titan Edge Mining Node (Docker based)",
         "params": ["identity_code"],
         "script_template": """#!/bin/bash
-yum update -y
-yum install -y docker
-service docker start
-systemctl enable docker
+# Install dependencies
+if [ -f /etc/debian_version ]; then
+    apt-get update && apt-get install -y docker.io curl
+    systemctl start docker
+    systemctl enable docker
+else
+    yum update -y && yum install -y docker curl
+    service docker start
+    systemctl enable docker
+fi
+
+# Pull Image
 docker pull nezha123/titan-edge
-sleep 20
-# Run the container first
-docker run -d --restart always --network host --name titan-edge -v ~/.titanedge:/root/.titanedge nezha123/titan-edge
-# Wait a bit for container to be fully up
+
+# Wait for network/docker
 sleep 10
-# Execute bind command
+
+# Run the container
+# Use host network for better connectivity or bridge if needed. Host is simpler for binding.
+# Volume mapping ensures identity persists.
+docker run -d --restart always --network host --name titan-edge \
+  -v ~/.titanedge:/root/.titanedge \
+  nezha123/titan-edge
+
+# Wait for container initialization
+sleep 15
+
+# Bind Identity
+# The key issue is that 'titan-edge bind' needs to communicate with the running daemon inside the container
+# or update the config file directly.
+# The official command is: titan-edge bind --hash=... https://...
 docker exec titan-edge titan-edge bind --hash={identity_code} https://api-test1.container1.titannet.io/api/v2/device/binding
 """
     },
