@@ -335,6 +335,39 @@ def sync_instances(user_id, credential_id, region, aws_instances):
         print(f"Sync DB fetch error: {e}")
         return stats
 
+def update_instance_projects_status(instance_id, detected_projects):
+    """
+    Update the boolean project flags for an instance.
+    detected_projects: List of strings (e.g. ['Titan', 'Nexus'])
+    Only sets flags to TRUE if detected; does NOT unset existing flags to avoid overwriting.
+    """
+    client = get_supabase()
+    if not client: return
+    
+    try:
+        data = {}
+        # Normalize input list
+        proj_list = [p.strip() for p in detected_projects]
+        
+        # Check and set corresponding booleans
+        # Note: We only update to True if detected. We generally don't set to False automatically
+        # to prevent transient detection failures from wiping out status.
+        if any("Titan" in p for p in proj_list): data["proj_titan"] = True
+        if any("Nexus" in p for p in proj_list): data["proj_nexus"] = True
+        if any("Shardeum" in p for p in proj_list): data["proj_shardeum"] = True
+        if any("Babylon" in p for p in proj_list): data["proj_babylon"] = True
+        if any("Meson" in p for p in proj_list) or any("Gaga" in p for p in proj_list): data["proj_meson"] = True
+        if any("Proxy" in p for p in proj_list) or any("Dante" in p for p in proj_list): data["proj_proxy"] = True
+        
+        if data:
+            client.table("instances") \
+                .update(data) \
+                .eq("instance_id", instance_id) \
+                .execute()
+            print(f"Updated instance {instance_id} projects: {data.keys()}")
+    except Exception as e:
+        print(f"Error updating instance projects: {e}")
+
     aws_map = {i['instance_id']: i for i in aws_instances}
     
     new_instances_data = []
