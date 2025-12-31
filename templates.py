@@ -67,7 +67,7 @@ sudo ./apphub restart
     },
     "Nexus_Prover": {
         "description": "Nexus Prover (Limited to 3 vCPU / 16GB RAM)",
-        "params": ["prover_id"],
+        "params": ["wallet_address"],
         "script_template": """#!/bin/bash
 # Install dependencies
 if [ -f /etc/debian_version ]; then
@@ -87,6 +87,17 @@ source $HOME/.cargo/env
 # Using the standard install command from their docs:
 curl https://cli.nexus.xyz/ | sh
 
+# Register with Wallet (New)
+# Ensure the binary is executable and run registration
+if [ -f "$HOME/.nexus/bin/nexus-cli" ]; then
+    $HOME/.nexus/bin/nexus-cli register-user --wallet-address {wallet_address}
+else
+    # Fallback path check or wait
+    echo "Waiting for installation..."
+    sleep 10
+    $HOME/.nexus/bin/nexus-cli register-user --wallet-address {wallet_address}
+fi
+
 # Configure Systemd Service with Limits
 cat <<EOF > /etc/systemd/system/nexus-prover.service
 [Unit]
@@ -96,7 +107,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/root/.nexus/bin/prover start --id {prover_id}
+ExecStart=/root/.nexus/bin/prover start
 Restart=always
 RestartSec=5
 # Resource Limits
