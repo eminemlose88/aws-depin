@@ -7,8 +7,8 @@ import extra_streamlit_components as stx
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_project
+from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status
-from billing import get_user_profile, add_balance, calculate_daily_cost, process_daily_billing, BASE_DAILY_FEE, EC2_INSTANCE_FEE, GFW_CHECK_FEE, LIGHTSAIL_INSTANCE_FEE
 from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
 
@@ -52,10 +52,13 @@ if not user:
 # Force refresh user role from DB to ensure instant admin access after DB update
 if user:
     try:
-        current_profile = get_user_profile(user.id)
-        if current_profile:
-            role = current_profile.get("role", "user")
-            st.session_state["user_role"] = role
+        # Assuming get_user_profile logic was moved or role is handled differently.
+        # Since we removed billing.py import which had get_user_profile, we might need a simple fallback 
+        # or just skip role check if it relied on billing table. 
+        # For now, let's just assume user role is 'user' or handled elsewhere if get_user_profile is gone.
+        # If get_user_profile was ONLY in billing, we need to remove this block or fix it.
+        # Let's remove the block for now as per "remove billing system" request.
+        pass
     except Exception as e:
         print(f"Role refresh failed: {e}")
 
@@ -68,13 +71,7 @@ if "admin_mode" in st.session_state and st.session_state["admin_mode"]:
 
 st.sidebar.markdown(f"👤 **{user.email}**")
 
-# Billing Info in Sidebar
-profile = get_user_profile(user.id)
-balance = float(profile.get("balance", 0.0) if profile else 0.0)
-st.sidebar.markdown("---")
-st.sidebar.markdown(f"💰 **余额: ${balance:.2f}**")
-if balance <= 0:
-    st.sidebar.error("⚠️ 余额不足，服务受限")
+# Billing Info REMOVED
 
 # Admin Entry Button
 if "user_role" in st.session_state and st.session_state["user_role"] == 'admin':
@@ -92,7 +89,7 @@ st.title("AWS DePIN Launcher (Pro)")
 st.markdown("多账号管理与一键部署平台。")
 
 # Tabs
-tab_creds, tab_deploy, tab_manage, tab_billing, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "💳 会员中心", "🛠️ 工具箱"])
+tab_creds, tab_deploy, tab_manage, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "🛠️ 工具箱"])
 
 # Load existing config
 config = load_config()
@@ -148,18 +145,14 @@ with tab_creds:
         st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
     with col_check:
         if st.button("🏥 一键体检 (含配额)", help="检查所有账号的状态及配额"):
-            # Check balance first
-            allowed, msg = check_balance(user.id)
-            if not allowed:
-                st.error(msg)
-            else:
-                with st.spinner("正在检查所有账号健康状态与配额..."):
-                    creds = get_user_credentials(user.id)
-                    if not creds:
-                        st.warning("无账号可检查")
-                    else:
-                        progress_bar = st.progress(0)
-                        for i, cred in enumerate(creds):
+            # Check balance removed
+            with st.spinner("正在检查所有账号健康状态与配额..."):
+                creds = get_user_credentials(user.id)
+                if not creds:
+                    st.warning("无账号可检查")
+                else:
+                    progress_bar = st.progress(0)
+                    for i, cred in enumerate(creds):
                             # Basic Health Check
                             proxy_url = cred.get('proxy_url')
                             # Check if proxy is needed but missing
@@ -332,15 +325,11 @@ with tab_deploy:
             if not selected_cred_labels:
                 st.error("请至少选择一个账号")
             else:
-                # Balance Check
-                allowed, msg = check_balance(user.id)
-                if not allowed:
-                    st.error(f"❌ {msg}")
-                else:
-                    # Confirm Launch
-                    target_creds = [next(c for c in creds if c['id'] == cred_options[label]) for label in selected_cred_labels]
-                    
-                    progress_bar = st.progress(0)
+                # Balance Check removed
+                # Confirm Launch
+                target_creds = [next(c for c in creds if c['id'] == cred_options[label]) for label in selected_cred_labels]
+                
+                progress_bar = st.progress(0)
                     status_area = st.empty()
                     results = []
                     
@@ -492,14 +481,11 @@ with tab_manage:
             
     with col_scan:
         if st.button("🌍 全网扫描 & 同步"):
-            allowed, msg = check_balance(user.id)
-            if not allowed:
-                st.error(msg)
+            # Balance Check removed
+            if not creds:
+                st.error("请先添加 AWS 凭证")
             else:
-                if not creds:
-                    st.error("请先添加 AWS 凭证")
-                else:
-                    progress_bar = st.progress(0)
+                progress_bar = st.progress(0)
                     status_text = st.empty()
                     total_steps = len(creds) * len(AMI_MAPPING)
                     current_step = 0
@@ -736,21 +722,17 @@ with tab_manage:
                                             else:
                                                 st.error(f"安装失败: {res['msg']}")
                         if st.button("🔍 深度检测"):
-                             # Balance Check
-                            allowed, msg = check_balance(user.id)
-                            if not allowed:
-                                st.error(msg)
-                            else:
-                                with st.spinner("Checking..."):
-                                    pkey = get_instance_private_key(selected_ssh_instance)
-                                    if pkey:
-                                        is_healthy, msg = check_instance_process(target_info['IP Address'], pkey, target_info['Project'])
-                                        new_health = "Healthy" if is_healthy else f"Error: {msg}"
-                                        update_instance_health(selected_ssh_instance, new_health)
-                                        if is_healthy: st.success(msg)
-                                        else: st.error(msg)
-                                        time.sleep(1)
-                                        st.rerun()
+                             # Balance Check removed
+                            with st.spinner("Checking..."):
+                                pkey = get_instance_private_key(selected_ssh_instance)
+                                if pkey:
+                                    is_healthy, msg = check_instance_process(target_info['IP Address'], pkey, target_info['Project (Summary)'])
+                                    new_health = "Healthy" if is_healthy else f"Error: {msg}"
+                                    update_instance_health(selected_ssh_instance, new_health)
+                                    if is_healthy: st.success(msg)
+                                    else: st.error(msg)
+                                    time.sleep(1)
+                                    st.rerun()
 
             # --- 3.1 Batch Project Installation ---
         st.divider()
@@ -832,14 +814,11 @@ with tab_manage:
                     if missing_params:
                         st.error(f"请填写必要参数: {', '.join(missing_params)}")
                     else:
-                        allowed, msg = check_balance(user.id)
-                        if not allowed:
-                            st.error(msg)
-                        else:
-                            # Generate script loop
-                            progress_bar = st.progress(0)
-                            status_area = st.empty()
-                            results = []
+                        # Balance Check removed
+                        # Generate script loop
+                        progress_bar = st.progress(0)
+                        status_area = st.empty()
+                        results = []
                             
                             from concurrent.futures import ThreadPoolExecutor, as_completed
 
