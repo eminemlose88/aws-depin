@@ -312,29 +312,6 @@ def update_instance_health(instance_id, health_status):
     except Exception as e:
         print(f"Error updating instance health: {e}")
 
-def sync_instances(user_id, credential_id, region, aws_instances):
-    """
-    Sync AWS instances with database records.
-    aws_instances: List of dicts from scan_all_instances
-    Optimized: Uses batch insert for new instances.
-    """
-    client = get_supabase()
-    if not client: return {"new": 0, "updated": 0}
-    
-    stats = {"new": 0, "updated": 0}
-    
-    # 1. Get DB instances for this credential and region
-    try:
-        db_res = client.table("instances") \
-            .select("instance_id, status") \
-            .eq("credential_id", credential_id) \
-            .eq("region", region) \
-            .execute()
-        db_map = {r['instance_id']: r['status'] for r in db_res.data}
-    except Exception as e:
-        print(f"Sync DB fetch error: {e}")
-        return stats
-
 def update_instance_projects_status(instance_id, detected_projects):
     """
     Update the boolean project flags for an instance.
@@ -367,6 +344,29 @@ def update_instance_projects_status(instance_id, detected_projects):
             print(f"Updated instance {instance_id} projects: {data.keys()}")
     except Exception as e:
         print(f"Error updating instance projects: {e}")
+
+def sync_instances(user_id, credential_id, region, aws_instances):
+    """
+    Sync AWS instances with database records.
+    aws_instances: List of dicts from scan_all_instances
+    Optimized: Uses batch insert for new instances.
+    """
+    client = get_supabase()
+    if not client: return {"new": 0, "updated": 0}
+    
+    stats = {"new": 0, "updated": 0}
+    
+    # 1. Get DB instances for this credential and region
+    try:
+        db_res = client.table("instances") \
+            .select("instance_id, status") \
+            .eq("credential_id", credential_id) \
+            .eq("region", region) \
+            .execute()
+        db_map = {r['instance_id']: r['status'] for r in db_res.data}
+    except Exception as e:
+        print(f"Sync DB fetch error: {e}")
+        return stats
 
     aws_map = {i['instance_id']: i for i in aws_instances}
     
