@@ -172,10 +172,25 @@ def update_aws_credential(cred_id, alias, ak, sk, proxy):
             .update(data) \
             .eq("id", cred_id) \
             .execute()
+        
+        # Debug: Check if update worked
+        # updated_row = client.table("aws_credentials").select("proxy_url").eq("id", cred_id).single().execute()
+        # print(f"DEBUG Update Result: {updated_row.data}")
+        
         return True
     except Exception as e:
         print(f"Error updating credential: {e}")
         return False
+
+def delete_instance(instance_id):
+    """Delete an instance record from the database."""
+    client = get_supabase()
+    if not client: return
+    try:
+        client.table("instances").delete().eq("instance_id", instance_id).execute()
+        print(f"Deleted instance record: {instance_id}")
+    except Exception as e:
+        print(f"Error deleting instance: {e}")
 
 def get_credential_vcpu_usage(credential_id):
     """
@@ -471,9 +486,14 @@ def sync_instances(user_id, credential_id, region, aws_instances):
                 })
         
         elif db_map[aws_id] != aws_status:
-            # Status changed - Update immediately (Batch update harder without unique constraint on instance_id)
-            update_instance_status(aws_id, aws_status)
-            stats["updated"] += 1
+            # Status changed
+            if aws_status == 'terminated':
+                # If terminated on AWS, delete local record to keep DB clean
+                delete_instance(aws_id)
+                stats["updated"] += 1
+            else:
+                update_instance_status(aws_id, aws_status)
+                stats["updated"] += 1
 
     # 3. Batch Insert New Instances
     if new_instances_data:
@@ -483,10 +503,11 @@ def sync_instances(user_id, credential_id, region, aws_instances):
         except Exception as e:
             print(f"Error batch importing instances: {e}")
 
-    # 4. Process Missing instances (Mark as Terminated)
+    # 4. Process Missing instances (Mark as Terminated -> Delete)
     for db_id, db_status in db_map.items():
-        if db_id not in aws_map and db_status != 'terminated':
-            update_instance_status(db_id, 'terminated')
+        if db_id not in aws_map:
+            # If missing from AWS, delete it (it's gone)
+            delete_instance(db_id)
             stats["updated"] += 1
             
     return stats

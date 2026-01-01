@@ -6,7 +6,7 @@ import time
 import extra_streamlit_components as stx
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity, get_vcpu_quota, has_running_instances
 from templates import PROJECT_REGISTRY, generate_script
-from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status, update_aws_credential, get_all_instance_types, get_credential_vcpu_usage
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status, update_aws_credential, get_all_instance_types, get_credential_vcpu_usage, delete_instance
 from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
 
@@ -307,6 +307,8 @@ def main():
                                         st.success("更新成功！")
                                         st.session_state[f"edit_mode_{cred['id']}"] = False
                                         time.sleep(0.5)
+                                        # Force cache clear and rerun
+                                        st.cache_data.clear()
                                         st.rerun()
                                     else:
                                         st.error("更新失败")
@@ -1050,8 +1052,9 @@ def main():
                         proxy_url = cred.get('proxy_url')
                         res = terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], i_id, proxy_url=proxy_url)
                         if res['status'] == 'success':
-                            update_instance_status(i_id, "shutting-down")
-                            return f"✅ {i_id}: 已发送关闭指令"
+                            # Directly delete the record as requested
+                            delete_instance(i_id)
+                            return f"✅ {i_id}: 已发送关闭指令并删除记录"
                         else:
                             return f"❌ {i_id}: 关闭失败 - {res['msg']}"
                     except Exception as e:
