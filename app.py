@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import time
 import extra_streamlit_components as stx
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity, get_vcpu_quota, has_running_instances
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status, update_aws_credential, get_all_instance_types, get_credential_vcpu_usage, delete_instance
@@ -161,8 +162,6 @@ def main():
                         status_text = st.empty()
                         results = []
                         
-                        from concurrent.futures import ThreadPoolExecutor, as_completed
-
                         def check_worker(cred):
                             try:
                                 # Basic Health Check
@@ -442,8 +441,6 @@ def main():
                     status_area = st.empty()
                     results = []
                     
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-
                     def launch_worker(cred):
                         # Quota Check
                         try:
@@ -557,7 +554,6 @@ def main():
                         time.sleep(1)
                         st.rerun()
                     else:
-                        from concurrent.futures import ThreadPoolExecutor, as_completed
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
@@ -711,7 +707,6 @@ def main():
                     real_time_status = {}
                     
                     # Parallelize Status Check
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
 
                     def fetch_status_worker(c_id, cred, r, i_ids):
                         try:
@@ -978,8 +973,6 @@ def main():
                             status_area = st.empty()
                             results = []
                             
-                            from concurrent.futures import ThreadPoolExecutor, as_completed
-
                             def install_worker(i_id, target_data, current_params):
                                 try:
                                     script = generate_script(target_proj, **current_params)
@@ -1076,8 +1069,6 @@ def main():
                 status_area = st.empty()
                 results = []
                 
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-
                 def terminate_worker(i_id):
                     target = next((d for d in display_data if d['Instance ID'] == i_id), None)
                     if not target:
