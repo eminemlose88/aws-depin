@@ -155,23 +155,25 @@ def update_credential_status(cred_id, status, limit=None, used=None):
     except Exception as e:
         print(f"Error updating credential status: {e}")
 
-def update_aws_credential(cred_id, alias, ak, sk, proxy):
-    """Update an existing AWS credential."""
+def update_aws_credential(cred_id, user_id, alias, ak, sk, proxy, status='active'):
+    """Update an existing AWS credential using UPSERT (Force Overwrite)."""
     client = get_supabase()
     if not client: return False
     
     try:
         data = {
+            "id": cred_id, # Key for upsert
+            "user_id": user_id,
             "alias_name": alias,
             "access_key_id": ak.strip(),
             "secret_access_key": sk.strip(),
-            "proxy_url": proxy.strip() if proxy else None
+            "proxy_url": proxy.strip() if proxy else None,
+            "status": status,
+            "last_checked": datetime.now().isoformat() # Update check time
         }
         
-        client.table("aws_credentials") \
-            .update(data) \
-            .eq("id", cred_id) \
-            .execute()
+        # Use upsert to force overwrite the row
+        client.table("aws_credentials").upsert(data).execute()
         
         # Debug: Check if update worked
         updated_row = client.table("aws_credentials").select("proxy_url").eq("id", cred_id).single().execute()
