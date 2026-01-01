@@ -86,7 +86,7 @@ st.title("AWS DePIN Launcher (Pro)")
 st.markdown("多账号管理与一键部署平台。")
 
 # Tabs
-tab_creds, tab_deploy, tab_manage, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "🛠️ 工具箱"])
+# tab_creds, tab_deploy, tab_manage, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "🛠️ 工具箱"])
 
 # Load config globally to avoid scoping issues
 config = load_config()
@@ -94,6 +94,13 @@ default_region = config.get('region', 'us-east-1')
 default_project = config.get('project', list(PROJECT_REGISTRY.keys())[0])
 
 def main():
+    # Tabs
+    tab_creds, tab_deploy, tab_manage, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "🛠️ 工具箱"])
+    
+    # Pre-fetch credentials for global use in all tabs
+    creds = get_user_credentials(user.id)
+    cred_lookup = {c['id']: c for c in creds} if creds else {}
+
     # ====================
     # TAB 1: Credentials Management
     # ====================
@@ -243,7 +250,7 @@ def main():
                             st.error("添加失败，请重试")
 
         # List existing credentials
-        creds = get_user_credentials(user.id)
+        # creds = get_user_credentials(user.id) # Already loaded in main()
         if creds:
             st.subheader("已保存的凭证")
             for cred in creds:
@@ -650,7 +657,7 @@ def main():
                 else:
                     # ... (Existing grouping logic) ...
                     batch_map = {}
-                    cred_lookup = {c['id']: c for c in creds}
+                    # cred_lookup = {c['id']: c for c in creds} # Already loaded in main()
 
                     for inst in db_instances:
                         c_id = inst['credential_id']
