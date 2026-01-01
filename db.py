@@ -158,7 +158,7 @@ def update_credential_status(cred_id, status, limit=None, used=None):
 def update_aws_credential(cred_id, user_id, alias, ak, sk, proxy, status='active'):
     """Update an existing AWS credential using UPSERT (Force Overwrite)."""
     client = get_supabase()
-    if not client: return False
+    if not client: return False, "Database connection failed"
     
     try:
         data = {
@@ -179,10 +179,11 @@ def update_aws_credential(cred_id, user_id, alias, ak, sk, proxy, status='active
         updated_row = client.table("aws_credentials").select("proxy_url").eq("id", cred_id).single().execute()
         print(f"DEBUG Update Result: {updated_row.data}")
         
-        return True
+        return True, "Success"
     except Exception as e:
-        print(f"Error updating credential: {e}")
-        return False
+        error_msg = str(e)
+        print(f"Error updating credential: {error_msg}")
+        return False, error_msg
 
 def delete_instance(instance_id):
     """Delete an instance record from the database."""

@@ -306,7 +306,8 @@ def main():
                             with c1:
                                 if st.form_submit_button("💾 保存修改"):
                                     # Pass full info for upsert
-                                    if update_aws_credential(cred['id'], user.id, new_alias, new_ak, new_sk, new_proxy, cred.get('status', 'active')):
+                                    success, msg = update_aws_credential(cred['id'], user.id, new_alias, new_ak, new_sk, new_proxy, cred.get('status', 'active'))
+                                    if success:
                                         st.success("更新成功！")
                                         st.session_state[f"edit_mode_{cred['id']}"] = False
                                         time.sleep(0.5)
@@ -314,7 +315,7 @@ def main():
                                         st.cache_data.clear()
                                         st.rerun()
                                     else:
-                                        st.error("更新失败")
+                                        st.error(f"更新失败: {msg}")
                             with c2:
                                 if st.form_submit_button("❌ 取消"):
                                     st.session_state[f"edit_mode_{cred['id']}"] = False
