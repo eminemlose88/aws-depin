@@ -93,12 +93,24 @@ NONINTERACTIVE=1 /tmp/nexus-install.sh
 CLI_PATH="$HOME/.nexus/bin/nexus-cli"
 
 if [ -f "$CLI_PATH" ]; then
+    # New flow: register-user then register-node
+    # But wait, register-user is deprecated? Or register-node needs args?
+    # The error says: "Please run 'nexus-cli register-node' first"
+    # And "User registered, but no node found"
+    
     $CLI_PATH register-user --wallet-address {wallet_address}
+    sleep 5
+    # Automatically register node (might be interactive, try with NONINTERACTIVE or default)
+    # Based on docs, register-node might need --node-id or generate one
+    # Try auto-generation
+    $CLI_PATH register-node
 else
     # Fallback/Wait
     echo "Waiting for installation..."
     sleep 10
     $CLI_PATH register-user --wallet-address {wallet_address}
+    sleep 5
+    $CLI_PATH register-node
 fi
 
 # Configure Systemd Service
