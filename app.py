@@ -144,46 +144,68 @@ with tab_creds:
     with col_add:
         st.markdown("在此添加你的 AWS Access Keys。部署时可直接选择，无需重复输入。")
     with col_check:
-        if st.button("🏥 一键体检 (含配额)", help="检查所有账号的状态及配额"):
+        if st.button("🏥 一键体检 (含配额)", help="并发检查所有账号的状态及配额"):
             # Check balance removed
-            with st.spinner("正在检查所有账号健康状态与配额..."):
+            with st.spinner("正在并发检查所有账号健康状态与配额..."):
                 creds = get_user_credentials(user.id)
                 if not creds:
                     st.warning("无账号可检查")
                 else:
                     progress_bar = st.progress(0)
-                    for i, cred in enumerate(creds):
+                    status_text = st.empty()
+                    results = []
+                    
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                    def check_worker(cred):
+                        try:
                             # Basic Health Check
                             proxy_url = cred.get('proxy_url')
-                            # Check if proxy is needed but missing
-                            if not proxy_url:
-                                st.warning(f"⚠️ {cred['alias_name']}: 建议配置代理以提高连接稳定性")
-                            
                             res = check_account_health(cred['access_key_id'], cred['secret_access_key'], proxy_url=proxy_url)
-                            # update_credential_status called below with quota info
                             
                             # Quota Check if active
+                            limit = None
+                            used = None
                             quota_msg = ""
+                            
                             if res['status'] == 'active':
                                 cap = check_capacity(cred['access_key_id'], cred['secret_access_key'], default_region, proxy_url=proxy_url)
-                                quota_msg = f" | 配额: {cap['used']}/{cap['limit']}"
-                                # Update with quota info
-                                update_credential_status(cred['id'], res['status'], limit=cap['limit'], used=cap['used'])
-                            else:
-                                # Update without quota info if not active
-                                update_credential_status(cred['id'], res['status'])
-                        
-                            if res['status'] != 'active':
-                                st.toast(f"{cred['alias_name']}: {res['msg']}", icon="⚠️")
-                            else:
-                                st.toast(f"{cred['alias_name']}: 正常 {quota_msg}", icon="✅")
+                                limit = cap['limit']
+                                used = cap['used']
+                                quota_msg = f" | 配额: {used}/{limit}"
                             
-                            progress_bar.progress((i + 1) / len(creds))
+                            # Update DB
+                            update_credential_status(cred['id'], res['status'], limit=limit, used=used)
+                            
+                            icon = "✅" if res['status'] == 'active' else "⚠️"
+                            return f"{icon} {cred['alias_name']}: {res['msg']}{quota_msg}"
+                        except Exception as e:
+                            return f"❌ {cred['alias_name']}: 检查失败 - {str(e)}"
+
+                    with ThreadPoolExecutor(max_workers=20) as executor:
+                        futures = [executor.submit(check_worker, c) for c in creds]
+                        
+                        completed_count = 0
+                        total_count = len(creds)
+                        
+                        for future in as_completed(futures):
+                            completed_count += 1
+                            progress_bar.progress(completed_count / total_count)
+                            try:
+                                res_str = future.result()
+                                results.append(res_str)
+                            except Exception as e:
+                                results.append(f"❌ 未知错误: {e}")
                             
                     st.success("检查完成！")
+                    
+                    with st.expander("查看详细体检报告", expanded=True):
+                        for r in results:
+                            st.write(r)
+                            
                     # Clear cache to force reload
                     st.cache_data.clear()
-                    time.sleep(1)
+                    time.sleep(2)
                     st.rerun()
 
     # Add new credential (Single)
