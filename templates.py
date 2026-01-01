@@ -78,27 +78,31 @@ else
     yum groupinstall -y "Development Tools"
 fi
 
-# Install Rust
+# Install Rust (Required for some environments, though binary should be self-contained)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 
-# Clone and Build Nexus (Assuming official repo structure)
-# Note: As of late 2024, Nexus usually provides a CLI or script. 
-# Using the standard install command from their docs:
-curl https://cli.nexus.xyz/ | sh
+# Install Nexus CLI (Non-Interactive)
+curl -sSf https://cli.nexus.xyz/ -o /tmp/nexus-install.sh
+chmod +x /tmp/nexus-install.sh
+# Run as root to install to /root/.nexus
+NONINTERACTIVE=1 /tmp/nexus-install.sh
 
-# Register with Wallet (New)
-# Ensure the binary is executable and run registration
-if [ -f "$HOME/.nexus/bin/nexus-cli" ]; then
-    $HOME/.nexus/bin/nexus-cli register-user --wallet-address {wallet_address}
+# Register with Wallet
+# The binary is named 'nexus-cli' in recent versions
+CLI_PATH="$HOME/.nexus/bin/nexus-cli"
+
+if [ -f "$CLI_PATH" ]; then
+    $CLI_PATH register-user --wallet-address {wallet_address}
 else
-    # Fallback path check or wait
+    # Fallback/Wait
     echo "Waiting for installation..."
     sleep 10
-    $HOME/.nexus/bin/nexus-cli register-user --wallet-address {wallet_address}
+    $CLI_PATH register-user --wallet-address {wallet_address}
 fi
 
-# Configure Systemd Service with Limits
+# Configure Systemd Service
+# Uses nexus-cli start --headless
 cat <<EOF > /etc/systemd/system/nexus-prover.service
 [Unit]
 Description=Nexus Prover Service
@@ -107,9 +111,10 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/root/.nexus/bin/prover start
+ExecStart=/root/.nexus/bin/nexus-cli start --headless
 Restart=always
 RestartSec=5
+Environment=NONINTERACTIVE=1
 # Resource Limits
 CPUQuota=300%
 MemoryLimit=16G
