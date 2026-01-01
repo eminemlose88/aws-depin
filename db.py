@@ -488,15 +488,15 @@ def sync_instances(user_id, credential_id, region, aws_instances):
                     "proj_proxy": False
                 })
         
+        elif aws_status == 'terminated':
+            # Always delete terminated instances from DB, even if status didn't change
+            delete_instance(aws_id)
+            stats["updated"] += 1
+            
         elif db_map[aws_id] != aws_status:
-            # Status changed
-            if aws_status == 'terminated':
-                # If terminated on AWS, delete local record to keep DB clean
-                delete_instance(aws_id)
-                stats["updated"] += 1
-            else:
-                update_instance_status(aws_id, aws_status)
-                stats["updated"] += 1
+            # Status changed (and not terminated)
+            update_instance_status(aws_id, aws_status)
+            stats["updated"] += 1
 
     # 3. Batch Insert New Instances
     if new_instances_data:
