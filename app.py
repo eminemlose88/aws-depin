@@ -294,25 +294,26 @@ def main():
             # Render Edit Form if active
             for cred in creds:
                 if st.session_state.get(f"edit_mode_{cred['id']}", False):
-                    with st.expander(f"编辑凭证: {cred['alias_name']}", expanded=True):
-                        with st.form(f"edit_form_{cred['id']}"):
-                            new_alias = st.text_input("备注名称", value=cred['alias_name'])
-                            new_ak = st.text_input("Access Key ID", value=cred['access_key_id'], type="password")
-                            new_sk = st.text_input("Secret Access Key", value=cred['secret_access_key'], type="password")
-                            new_proxy = st.text_input("代理地址", value=cred.get('proxy_url', ''))
-                            
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                if st.form_submit_button("💾 保存修改"):
-                                    if update_aws_credential(cred['id'], new_alias, new_ak, new_sk, new_proxy):
-                                        st.success("更新成功！")
-                                        st.session_state[f"edit_mode_{cred['id']}"] = False
-                                        time.sleep(0.5)
-                                        # Force cache clear and rerun
-                                        st.cache_data.clear()
-                                        st.rerun()
-                                    else:
-                                        st.error("更新失败")
+        with st.expander(f"编辑凭证: {cred['alias_name']}", expanded=True):
+            with st.form(f"edit_form_{cred['id']}"):
+                # Use unique keys to prevent state crosstalk
+                new_alias = st.text_input("备注名称", value=cred['alias_name'], key=f"e_alias_{cred['id']}")
+                new_ak = st.text_input("Access Key ID", value=cred['access_key_id'], type="password", key=f"e_ak_{cred['id']}")
+                new_sk = st.text_input("Secret Access Key", value=cred['secret_access_key'], type="password", key=f"e_sk_{cred['id']}")
+                new_proxy = st.text_input("代理地址", value=cred.get('proxy_url', ''), type="password", key=f"e_proxy_{cred['id']}")
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.form_submit_button("💾 保存修改"):
+                        if update_aws_credential(cred['id'], new_alias, new_ak, new_sk, new_proxy):
+                            st.success("更新成功！")
+                            st.session_state[f"edit_mode_{cred['id']}"] = False
+                            time.sleep(0.5)
+                            # Force cache clear and rerun
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("更新失败")
                             with c2:
                                 if st.form_submit_button("❌ 取消"):
                                     st.session_state[f"edit_mode_{cred['id']}"] = False

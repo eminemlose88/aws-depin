@@ -174,8 +174,8 @@ def update_aws_credential(cred_id, alias, ak, sk, proxy):
             .execute()
         
         # Debug: Check if update worked
-        # updated_row = client.table("aws_credentials").select("proxy_url").eq("id", cred_id).single().execute()
-        # print(f"DEBUG Update Result: {updated_row.data}")
+        updated_row = client.table("aws_credentials").select("proxy_url").eq("id", cred_id).single().execute()
+        print(f"DEBUG Update Result: {updated_row.data}")
         
         return True
     except Exception as e:
