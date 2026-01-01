@@ -469,24 +469,29 @@ def main():
                             )
                             
                             if result['status'] == 'success':
-                                log_instance(
-                                    user_id=user.id,
-                                    credential_id=cred['id'],
-                                    instance_id=result['id'],
-                                    ip=result['ip'],
-                                    region=region,
-                                    project_name="Pending",
-                                    status="active",
-                                    private_key=result.get('private_key'),
-                                    specs={
-                                        "instance_type": target_instance_type,
-                                        "vcpu_count": spec_info.get('vcpu_count'),
-                                        "memory_gb": spec_info.get('memory_gb'),
-                                        "os_name": os_type,
-                                        "disk_info": f"{volume_size}GB {volume_type}"
-                                    }
-                                )
-                                return f"✅ {cred['alias_name']}: 成功 ({result['id']})"
+                                try:
+                                    log_instance(
+                                        user_id=user.id,
+                                        credential_id=cred['id'],
+                                        instance_id=result['id'],
+                                        ip=result['ip'],
+                                        region=region,
+                                        project_name="Pending",
+                                        status="active",
+                                        private_key=result.get('private_key'),
+                                        specs={
+                                            "instance_type": target_instance_type,
+                                            "vcpu_count": spec_info.get('vcpu_count'),
+                                            "memory_gb": spec_info.get('memory_gb'),
+                                            "os_name": os_type,
+                                            "disk_info": f"{volume_size}GB {volume_type}"
+                                        }
+                                    )
+                                    return f"✅ {cred['alias_name']}: 成功 ({result['id']})"
+                                except Exception as db_err:
+                                    # Launch success but DB log failed
+                                    print(f"DB Log Error: {db_err}")
+                                    return f"✅ {cred['alias_name']}: 启动成功但记录失败 ({result['id']}) - {str(db_err)}"
                             else:
                                 return f"❌ {cred['alias_name']}: 失败 - {result['msg']}"
                         except Exception as e:
@@ -617,44 +622,70 @@ def main():
                 else:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
-                    total_steps = len(creds) * len(AMI_MAPPING)
-                    current_step = 0
-                    total_new = 0
-                    total_updated = 0
                     
+                    # Prepare tasks
+                    tasks = []
                     for cred in creds:
-                        if cred.get('status') == 'suspended':
-                            current_step += len(AMI_MAPPING)
-                            progress_bar.progress(min(current_step / total_steps, 1.0))
-                            continue
-
+                        if cred.get('status') == 'suspended': continue
                         for region_code in AMI_MAPPING.keys():
-                            current_step += 1
-                            progress = current_step / total_steps
-                            progress_bar.progress(progress)
-                            status_text.text(f"Scanning: {cred['alias_name']} - {region_code}...")
-                            
-                            proxy_url = cred.get('proxy_url')
-                            aws_instances = scan_all_instances(
-                                cred['access_key_id'], 
-                                cred['secret_access_key'], 
-                                region_code,
-                                proxy_url=proxy_url
-                            )
-                            
-                            if aws_instances:
-                                res = sync_instances(user.id, cred['id'], region_code, aws_instances)
-                                total_new += res['new']
-                                total_updated += res['updated']
+                            tasks.append((cred, region_code))
                     
-                    progress_bar.progress(1.0)
-                    status_text.empty()
-                    st.success(f"扫描完成！新增 {total_new}，更新 {total_updated}。")
-                    # Clear cache to reflect new data
-                    if "display_data" in st.session_state:
-                        del st.session_state["display_data"]
-                    time.sleep(2)
-                    st.rerun()
+                    total_tasks = len(tasks)
+                    if total_tasks == 0:
+                        st.warning("没有活跃的凭证或区域可扫描。")
+                    else:
+                        completed_tasks = 0
+                        total_new = 0
+                        total_updated = 0
+                        
+                        # Concurrency Worker
+                        def scan_worker(cred, region_code):
+                            try:
+                                proxy_url = cred.get('proxy_url')
+                                aws_instances = scan_all_instances(
+                                    cred['access_key_id'], 
+                                    cred['secret_access_key'], 
+                                    region_code,
+                                    proxy_url=proxy_url
+                                )
+                                
+                                if aws_instances:
+                                    res = sync_instances(user.id, cred['id'], region_code, aws_instances)
+                                    return (res['new'], res['updated'], None)
+                                return (0, 0, None)
+                            except Exception as e:
+                                return (0, 0, f"{cred['alias_name']}-{region_code}: {str(e)}")
+
+                        # Execute with ThreadPool
+                        with ThreadPoolExecutor(max_workers=20) as executor:
+                            future_to_task = {
+                                executor.submit(scan_worker, t[0], t[1]): t 
+                                for t in tasks
+                            }
+                            
+                            for future in as_completed(future_to_task):
+                                cred, r_code = future_to_task[future]
+                                completed_tasks += 1
+                                progress_bar.progress(completed_tasks / total_tasks)
+                                status_text.text(f"Scanning ({completed_tasks}/{total_tasks}): {cred['alias_name']} - {r_code}")
+                                
+                                try:
+                                    n, u, err = future.result()
+                                    total_new += n
+                                    total_updated += u
+                                    if err:
+                                        print(f"Scan Error: {err}") # Log to console, don't spam UI
+                                except Exception as exc:
+                                    print(f"Worker Exception: {exc}")
+
+                        progress_bar.progress(1.0)
+                        status_text.empty()
+                        st.success(f"扫描完成！新增 {total_new}，更新 {total_updated}。")
+                        # Clear cache to reflect new data
+                        if "display_data" in st.session_state:
+                            del st.session_state["display_data"]
+                        time.sleep(2)
+                        st.rerun()
 
         # Load data (Cached or Fresh)
         if "display_data" not in st.session_state:
