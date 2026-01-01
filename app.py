@@ -1019,29 +1019,74 @@ def main():
             
             if not filtered_term_instances and term_search_term:
                  st.caption("无匹配实例")
-                 instance_to_term = None
+                 instances_to_term = []
             else:
-                instance_to_term = st.selectbox(
+                instance_options = {f"{d['Instance ID']} - {d['Project (Summary)']} ({d['IP Address']})": d['Instance ID'] for d in filtered_term_instances}
+                
+                selected_term_labels = st.multiselect(
                     f"选择要关闭的实例 (匹配: {len(filtered_term_instances)})", 
-                    [d['Instance ID'] for d in filtered_term_instances], 
-                    key="term_select",
-                    format_func=lambda x: f"{x} - {next((d['Project (Summary)'] for d in filtered_term_instances if d['Instance ID'] == x), '')} ({next((d['IP Address'] for d in filtered_term_instances if d['Instance ID'] == x), '')})"
-                ) if filtered_term_instances else None
+                    options=list(instance_options.keys()),
+                    default=[]
+                )
+                instances_to_term = [instance_options[l] for l in selected_term_labels]
             
-            if instance_to_term and st.button("🛑 关闭实例", type="primary"):
-                target = next((d for d in display_data if d['Instance ID'] == instance_to_term), None)
-                if target:
+            if instances_to_term and st.button("🛑 批量关闭实例", type="primary"):
+                progress_bar = st.progress(0)
+                status_area = st.empty()
+                results = []
+                
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                def terminate_worker(i_id):
+                    target = next((d for d in display_data if d['Instance ID'] == i_id), None)
+                    if not target:
+                        return f"❌ {i_id}: 未找到实例数据"
+                    
                     cred = cred_lookup.get(target['_cred_id'])
-                    if cred:
-                            proxy_url = cred.get('proxy_url')
-                            terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], instance_to_term, proxy_url=proxy_url)
-                            update_instance_status(instance_to_term, "shutting-down")
-                            # Clear cache
-                            if "display_data" in st.session_state:
-                                del st.session_state["display_data"]
-                            st.success("已关闭")
-                            time.sleep(1)
-                            st.rerun()
+                    if not cred:
+                        return f"❌ {i_id}: 未找到凭证"
+                        
+                    try:
+                        proxy_url = cred.get('proxy_url')
+                        res = terminate_instance(cred['access_key_id'], cred['secret_access_key'], target['Region'], i_id, proxy_url=proxy_url)
+                        if res['status'] == 'success':
+                            update_instance_status(i_id, "shutting-down")
+                            return f"✅ {i_id}: 已发送关闭指令"
+                        else:
+                            return f"❌ {i_id}: 关闭失败 - {res['msg']}"
+                    except Exception as e:
+                        return f"❌ {i_id}: 异常 - {str(e)}"
+
+                with ThreadPoolExecutor(max_workers=20) as executor:
+                    futures = [executor.submit(terminate_worker, i_id) for i_id in instances_to_term]
+                    
+                    completed_count = 0
+                    total_count = len(futures)
+                    
+                    for future in as_completed(futures):
+                        try:
+                            res = future.result()
+                            results.append(res)
+                        except Exception as e:
+                            results.append(f"❌ (Unknown): {e}")
+                        
+                        completed_count += 1
+                        progress_bar.progress(completed_count / total_count)
+                        status_area.text(f"处理进度: {completed_count}/{total_count}")
+                
+                status_area.empty()
+                
+                # Clear cache
+                if "display_data" in st.session_state:
+                    del st.session_state["display_data"]
+                
+                st.success("批量关闭操作完成！")
+                with st.expander("查看详细结果", expanded=True):
+                    for r in results:
+                        st.write(r)
+                        
+                time.sleep(2)
+                st.rerun()
 
     # ====================
     # TAB 4: Toolbox
