@@ -177,6 +177,34 @@ def update_aws_credential(cred_id, alias, ak, sk, proxy):
         print(f"Error updating credential: {e}")
         return False
 
+def get_credential_vcpu_usage(credential_id):
+    """
+    Calculate total vCPU usage for a credential based on local DB.
+    """
+    client = get_supabase()
+    if not client: return 0
+    
+    try:
+        # Fetch vcpu_count for all active instances
+        response = client.table("instances") \
+            .select("vcpu_count") \
+            .eq("credential_id", credential_id) \
+            .neq("status", "terminated") \
+            .neq("status", "shutting-down") \
+            .execute()
+        
+        total = 0
+        if response.data:
+            for row in response.data:
+                count = row.get("vcpu_count")
+                if count: # Handle None
+                    total += int(count)
+        return total
+    except Exception as e:
+        print(f"Error calculating vCPU usage: {e}")
+        return 0
+
+
 # --- Instance Management ---
 
 def get_all_instance_types():

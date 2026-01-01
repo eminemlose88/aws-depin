@@ -88,6 +88,30 @@ def get_current_usage(ak, sk, region, proxy_url=None):
     except Exception:
         return 0
 
+def has_running_instances(ak, sk, region, proxy_url=None):
+    """
+    Lightweight check if any instances are running/pending.
+    Returns: True if any instance found, False otherwise.
+    """
+    config = Config(proxies={'https': proxy_url, 'http': proxy_url}) if proxy_url else None
+    try:
+        session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
+        ec2 = session.client('ec2', config=config)
+        
+        # MaxResults=5 is enough to detect existence
+        response = ec2.describe_instances(
+            Filters=[{'Name': 'instance-state-name', 'Values': ['running', 'pending']}],
+            MaxResults=5 
+        )
+        
+        for r in response.get('Reservations', []):
+            if r.get('Instances'):
+                return True
+                
+        return False
+    except Exception:
+        return False
+
 def check_capacity(ak, sk, region, proxy_url=None):
     """
     Check available capacity for new instances.
