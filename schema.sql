@@ -15,6 +15,15 @@ CREATE TABLE IF NOT EXISTS aws_credentials (
     UNIQUE(user_id, access_key_id)
 );
 
+-- 2.1 创建机型规格表 (AWS Instance Types)
+CREATE TABLE IF NOT EXISTS aws_instance_types (
+    instance_type TEXT PRIMARY KEY,
+    vcpu INT,
+    memory_gb FLOAT,
+    category TEXT,
+    arch TEXT DEFAULT 'x86_64'
+);
+
 -- 3. 更新 instances 表 (Instances)
 -- 不再直接存 AK，而是关联 user_id 和 aws_credential_id
 -- 如果之前有数据，需要先清空或手动迁移，这里使用 DROP TABLE 重建以确保结构正确
@@ -31,6 +40,11 @@ CREATE TABLE IF NOT EXISTS instances (
     status TEXT DEFAULT 'active',
     private_key TEXT, -- 加密存储的 SSH 私钥
     health_status TEXT, -- 深度健康检查状态: Healthy, Missing Container, SSH Error 等
+    instance_type TEXT, -- 实例机型 (e.g. t3.medium)
+    vcpu_count INT, -- CPU 核数
+    memory_gb FLOAT, -- 内存大小 (GB)
+    os_name TEXT, -- 操作系统名称
+    disk_info TEXT, -- 硬盘信息 (e.g. 30GB gp3)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 

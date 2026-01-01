@@ -143,7 +143,7 @@ def ensure_security_group(ec2_client):
                 return None
         return None
 
-def launch_base_instance(ak, sk, region, instance_type='t2.micro', image_type='al2023', proxy_url=None):
+def launch_base_instance(ak, sk, region, instance_type='t2.micro', image_type='al2023', volume_size=8, volume_type='gp3', proxy_url=None):
     """
     Step 1: Launch a base EC2 instance (Pure OS).
     Returns: {status, ip, id, private_key, msg}
@@ -165,6 +165,13 @@ def launch_base_instance(ak, sk, region, instance_type='t2.micro', image_type='a
     try:
         session = boto3.Session(aws_access_key_id=ak, aws_secret_access_key=sk, region_name=region)
         ec2 = session.client('ec2', config=config)
+
+        # 0. Get Root Device Name for AMI
+        try:
+            img_desc = ec2.describe_images(ImageIds=[ami_id])
+            root_device_name = img_desc['Images'][0]['RootDeviceName']
+        except Exception:
+            root_device_name = '/dev/xvda' # Fallback
 
         # 1. Create Key Pair
         timestamp = int(time.time())
@@ -200,6 +207,18 @@ service docker start
 usermod -a -G docker ec2-user
 systemctl enable docker
 """
+        # Block Device Mapping for Root Volume
+        block_device_mappings = [
+            {
+                'DeviceName': root_device_name,
+                'Ebs': {
+                    'VolumeSize': int(volume_size),
+                    'VolumeType': volume_type,
+                    'DeleteOnTermination': True
+                }
+            }
+        ]
+
         response = ec2.run_instances(
             ImageId=ami_id,
             InstanceType=instance_type,
@@ -207,6 +226,7 @@ systemctl enable docker
             MaxCount=1,
             KeyName=key_name,
             UserData=base_user_data,
+            BlockDeviceMappings=block_device_mappings,
             NetworkInterfaces=[{
                 'DeviceIndex': 0,
                 'AssociatePublicIpAddress': True,

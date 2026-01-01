@@ -8,7 +8,7 @@ from logic import launch_base_instance, AMI_MAPPING, get_instance_status, termin
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_project
 from templates import PROJECT_REGISTRY, generate_script
-from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status
+from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status, update_aws_credential, get_all_instance_types
 from auth import login_page, get_current_user, sign_out
 from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
 
@@ -91,13 +91,14 @@ st.markdown("多账号管理与一键部署平台。")
 # Tabs
 tab_creds, tab_deploy, tab_manage, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "🛠️ 工具箱"])
 
-# Load existing config
-config = load_config()
-default_region = config.get('region', 'us-east-1')
-default_project = config.get('project', list(PROJECT_REGISTRY.keys())[0])
+def main():
+    # Load existing config
+    config = load_config()
+    default_region = config.get('region', 'us-east-1')
+    default_project = config.get('project', list(PROJECT_REGISTRY.keys())[0])
 
-# ====================
-# TAB 1: Credentials Management
+    # ====================
+    # TAB 1: Credentials Management
 # ====================
 with tab_creds:
     st.header("AWS 凭证管理")
@@ -138,6 +139,9 @@ with tab_creds:
                 st.rerun()
 
     st.divider()
+
+if __name__ == "__main__":
+    main()
 
     # 1.2 Single Add & List (Existing)
     col_add, col_check = st.columns([3, 1])
@@ -259,9 +263,38 @@ with tab_creds:
                 else:
                     st.caption("从未检查")
             with col5:
+                # Edit Button
+                if st.button("✏️", key=f"edit_{cred['id']}", help="编辑凭证"):
+                    st.session_state[f"edit_mode_{cred['id']}"] = not st.session_state.get(f"edit_mode_{cred['id']}", False)
+                # Delete Button
                 if st.button("🗑️", key=f"del_{cred['id']}", help="删除此凭证"):
                     delete_aws_credential(cred['id'])
                     st.rerun()
+        
+        # Render Edit Form if active
+        for cred in creds:
+            if st.session_state.get(f"edit_mode_{cred['id']}", False):
+                with st.expander(f"编辑凭证: {cred['alias_name']}", expanded=True):
+                    with st.form(f"edit_form_{cred['id']}"):
+                        new_alias = st.text_input("备注名称", value=cred['alias_name'])
+                        new_ak = st.text_input("Access Key ID", value=cred['access_key_id'], type="password")
+                        new_sk = st.text_input("Secret Access Key", value=cred['secret_access_key'], type="password")
+                        new_proxy = st.text_input("代理地址", value=cred.get('proxy_url', ''))
+                        
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.form_submit_button("💾 保存修改"):
+                                if update_aws_credential(cred['id'], new_alias, new_ak, new_sk, new_proxy):
+                                    st.success("更新成功！")
+                                    st.session_state[f"edit_mode_{cred['id']}"] = False
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.error("更新失败")
+                        with c2:
+                            if st.form_submit_button("❌ 取消"):
+                                st.session_state[f"edit_mode_{cred['id']}"] = False
+                                st.rerun()
     else:
         st.info("暂无凭证，请先添加。")
 
@@ -285,49 +318,75 @@ with tab_deploy:
 
         st.subheader("启动基础实例 (Base Instance)")
         
-        # 2.0 Launch Mode Selection (Custom Only)
+        # 2.0 Launch Configuration
         st.write("配置实例规格:")
         
-        col_cpu, col_mem, col_fam, col_os = st.columns(4)
+        # Row 1: Instance Type Selection
+        col_fam, col_type = st.columns([1, 2])
         
-        with col_cpu:
-            cpu_cores = st.selectbox("CPU 核数", [1, 2, 4, 8, 16, 32, 48, 64], index=1)
-            
-        with col_mem:
-            mem_size = st.selectbox("内存大小 (GB)", [1, 2, 4, 8, 16, 32, 64, 128], index=2)
-            
+        # Load Instance Types from DB
+        db_instance_types = get_all_instance_types()
+        
+        # Organize by Category
+        categories = {}
+        type_to_spec = {} # Map type to spec for lookup
+        
+        if db_instance_types:
+            for it in db_instance_types:
+                cat = it.get('category', 'Other')
+                t = it['instance_type']
+                if cat not in categories:
+                    categories[cat] = []
+                categories[cat].append(t)
+                type_to_spec[t] = it
+        else:
+            # Fallback if DB not ready
+            categories = {"General Purpose": ["t2.micro", "t3.medium"]}
+            type_to_spec = {"t2.micro": {"vcpu": 1, "memory_gb": 1}, "t3.medium": {"vcpu": 2, "memory_gb": 4}}
+
         with col_fam:
-            fam_type = st.selectbox("实例系列", ["通用型 (T/M)", "计算型 (C)", "内存型 (R)"], index=0)
-            
+            # Instance Family Filters
+            fam_options = list(categories.keys()) + ["自定义输入"]
+            family_filter = st.selectbox("实例系列分类", fam_options, index=0)
+        
+        with col_type:
+            spec_info = {}
+            if family_filter == "自定义输入":
+                target_instance_type = st.text_input("请输入 AWS 机型代码 (例如: c6a.2xlarge)", value="t2.micro").strip()
+                spec_info = {"vcpu_count": 0, "memory_gb": 0} # Unknown
+            else:
+                available_types = categories.get(family_filter, [])
+                
+                # Format function to show specs
+                def format_type(t):
+                    spec = type_to_spec.get(t)
+                    if spec:
+                        return f"{t} ({spec.get('vcpu')} vCPU, {spec.get('memory_gb')} GB)"
+                    return t
+                
+                target_instance_type = st.selectbox("选择机型", available_types, format_func=format_type)
+                
+                # Get specs for selected type
+                raw_spec = type_to_spec.get(target_instance_type, {})
+                spec_info = {
+                    "vcpu_count": raw_spec.get('vcpu'),
+                    "memory_gb": raw_spec.get('memory_gb')
+                }
+
+        # Row 2: OS & Storage
+        col_os, col_vol_size, col_vol_type = st.columns([2, 1, 1])
+        
         with col_os:
-            os_type = st.selectbox("操作系统", ["Amazon Linux 2023", "Ubuntu 22.04 LTS"], index=0)
-
-        # Logic to determine instance type
-        target_instance_type = 't2.micro' # Default fallback
-        
-        # Simple mapping logic
-        if fam_type == "通用型 (T/M)":
-            if cpu_cores == 1 and mem_size == 1: target_instance_type = 't2.micro'
-            elif cpu_cores == 2 and mem_size == 4: target_instance_type = 't3.medium'
-            elif cpu_cores == 2 and mem_size == 8: target_instance_type = 'm5.large'
-            elif cpu_cores == 4 and mem_size == 16: target_instance_type = 'm5.xlarge'
-            elif cpu_cores == 8 and mem_size == 32: target_instance_type = 'm5.2xlarge'
-            else: target_instance_type = 'm5.large' # Fallback
+            os_type = st.selectbox("操作系统", ["Amazon Linux 2023", "Ubuntu 22.04 LTS", "Ubuntu 24.04 LTS"], index=0)
+            image_type_code = 'al2023' if "Amazon" in os_type else 'ubuntu'
             
-        elif fam_type == "计算型 (C)":
-            if cpu_cores == 2 and mem_size == 4: target_instance_type = 'c5.large'
-            elif cpu_cores == 4 and mem_size == 8: target_instance_type = 'c5.xlarge'
-            elif cpu_cores == 8 and mem_size == 16: target_instance_type = 'c5.2xlarge'
-            else: target_instance_type = 'c5.large'
+        with col_vol_size:
+            volume_size = st.number_input("根卷大小 (GB)", min_value=8, max_value=1000, value=30, step=1)
             
-        elif fam_type == "内存型 (R)":
-            if cpu_cores == 2 and mem_size == 16: target_instance_type = 'r5.large'
-            elif cpu_cores == 4 and mem_size == 32: target_instance_type = 'r5.xlarge'
-            else: target_instance_type = 'r5.large'
+        with col_vol_type:
+            volume_type = st.selectbox("卷类型", ["gp3", "gp2", "io1", "standard"], index=0)
 
-        st.caption(f"匹配到的实例类型: **{target_instance_type}**")
-        
-        image_type_code = 'al2023' if "Amazon" in os_type else 'ubuntu'
+        st.caption(f"已选配置: **{target_instance_type}** | **{os_type}** | **{volume_size}GB {volume_type}**")
         
         # 2.1 Batch Launch Selection
         st.write("选择要部署的 AWS 账号 (可多选):")
@@ -375,6 +434,8 @@ with tab_deploy:
                             region,
                             instance_type=target_instance_type,
                             image_type=image_type_code,
+                            volume_size=volume_size,
+                            volume_type=volume_type,
                             proxy_url=proxy_url
                         )
                         
@@ -387,34 +448,52 @@ with tab_deploy:
                                 region=region,
                                 project_name="Pending",
                                 status="active",
-                                private_key=result.get('private_key')
+                                private_key=result.get('private_key'),
+                                specs={
+                                    "instance_type": target_instance_type,
+                                    "vcpu_count": spec_info.get('vcpu_count'),
+                                    "memory_gb": spec_info.get('memory_gb'),
+                                    "os_name": os_type,
+                                    "disk_info": f"{volume_size}GB {volume_type}"
+                                }
                             )
                             return f"✅ {cred['alias_name']}: 成功 ({result['id']})"
                         else:
                             return f"❌ {cred['alias_name']}: 失败 - {result['msg']}"
                     except Exception as e:
                         return f"❌ {cred['alias_name']}: 异常 - {str(e)}"
-
+                
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     future_to_cred = {executor.submit(launch_worker, cred): cred for cred in target_creds}
                     
                     completed_count = 0
                     total_count = len(target_creds)
+                    failed_accounts = []
                     
                     for future in as_completed(future_to_cred):
                         cred = future_to_cred[future]
                         try:
                             res = future.result()
                             results.append(res)
+                            if "❌" in res:
+                                failed_accounts.append(f"{cred['alias_name']}: {res.split('失败 - ')[-1] if '失败 - ' in res else 'Unknown Error'}")
                         except Exception as exc:
                             results.append(f"❌ {cred['alias_name']}: 线程异常 - {str(exc)}")
+                            failed_accounts.append(f"{cred['alias_name']}: Thread Error")
                         
                         completed_count += 1
                         progress_bar.progress(completed_count / total_count)
                         status_area.text(f"处理进度: {completed_count}/{total_count}")
                 
                 status_area.empty()
-                st.success("批量操作完成！")
+                
+                if failed_accounts:
+                    st.error(f"⚠️ 以下 {len(failed_accounts)} 个账号启动失败:")
+                    for fail in failed_accounts:
+                        st.markdown(f"- {fail}")
+                else:
+                    st.success("批量操作全部完成！")
+                    
                 with st.expander("查看详细结果", expanded=True):
                     for r in results:
                         st.write(r)

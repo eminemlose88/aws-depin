@@ -155,13 +155,46 @@ def update_credential_status(cred_id, status, limit=None, used=None):
     except Exception as e:
         print(f"Error updating credential status: {e}")
 
+def update_aws_credential(cred_id, alias, ak, sk, proxy):
+    """Update an existing AWS credential."""
+    client = get_supabase()
+    if not client: return False
+    
+    try:
+        data = {
+            "alias_name": alias,
+            "access_key_id": ak.strip(),
+            "secret_access_key": sk.strip(),
+            "proxy_url": proxy.strip() if proxy else None
+        }
+        
+        client.table("aws_credentials") \
+            .update(data) \
+            .eq("id", cred_id) \
+            .execute()
+        return True
+    except Exception as e:
+        print(f"Error updating credential: {e}")
+        return False
+
 # --- Instance Management ---
 
-def log_instance(user_id, credential_id, instance_id, ip, region, project_name, status="active", private_key=None):
+def get_all_instance_types():
+    """Retrieve all instance types from the database."""
+    client = get_supabase()
+    if not client: return []
+    try:
+        response = client.table("aws_instance_types").select("*").order("instance_type").execute()
+        return response.data
+    except Exception as e:
+        print(f"Error fetching instance types: {e}")
+        return []
+
+def log_instance(user_id, credential_id, instance_id, ip, region, project_name, status="active", private_key=None, specs=None):
     """
     Log instance details to Supabase 'instances' table with user_id association.
     Encodes private key if provided.
-    (Updated to support boolean project columns initialization)
+    Supports optional specs dictionary for detailed configuration logging.
     """
     client = get_supabase()
     if not client:
@@ -198,6 +231,17 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
             "proj_meson": is_meson,
             "proj_proxy": is_proxy
         }
+        
+        # Add specs if provided
+        if specs:
+            data.update({
+                "instance_type": specs.get("instance_type"),
+                "vcpu_count": specs.get("vcpu_count"),
+                "memory_gb": specs.get("memory_gb"),
+                "os_name": specs.get("os_name"),
+                "disk_info": specs.get("disk_info")
+            })
+
         client.table("instances").insert(data).execute()
         print(f"Logged instance {instance_id} to database.")
     except Exception as e:
