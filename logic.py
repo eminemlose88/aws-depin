@@ -167,7 +167,7 @@ def ensure_security_group(ec2_client):
                 return None
         return None
 
-def launch_base_instance(ak, sk, region, instance_type='t2.micro', image_type='al2023', volume_size=8, volume_type='gp3', proxy_url=None):
+def launch_base_instance(ak, sk, region, instance_type='t2.micro', image_type='al2023', volume_size=8, volume_type='gp3', proxy_url=None, use_spot=False):
     """
     Step 1: Launch a base EC2 instance (Pure OS).
     Returns: {status, ip, id, private_key, msg}
@@ -243,27 +243,40 @@ systemctl enable docker
             }
         ]
 
-        response = ec2.run_instances(
-            ImageId=ami_id,
-            InstanceType=instance_type,
-            MinCount=1,
-            MaxCount=1,
-            KeyName=key_name,
-            UserData=base_user_data,
-            BlockDeviceMappings=block_device_mappings,
-            NetworkInterfaces=[{
+        # Prepare arguments for run_instances
+        run_args = {
+            'ImageId': ami_id,
+            'InstanceType': instance_type,
+            'MinCount': 1,
+            'MaxCount': 1,
+            'KeyName': key_name,
+            'UserData': base_user_data,
+            'BlockDeviceMappings': block_device_mappings,
+            'NetworkInterfaces': [{
                 'DeviceIndex': 0,
                 'AssociatePublicIpAddress': True,
                 'Groups': [sg_id]
             }],
-            TagSpecifications=[{
+            'TagSpecifications': [{
                 'ResourceType': 'instance',
                 'Tags': [
                     {'Key': 'Name', 'Value': 'Base-Worker'},
                     {'Key': 'Project', 'Value': 'Pending'} 
                 ]
             }]
-        )
+        }
+
+        # Add Spot Options if enabled
+        if use_spot:
+            run_args['InstanceMarketOptions'] = {
+                'MarketType': 'spot',
+                'SpotOptions': {
+                    'SpotInstanceType': 'one-time',
+                    'InstanceInterruptionBehavior': 'terminate'
+                }
+            }
+
+        response = ec2.run_instances(**run_args)
 
         instance_id = response['Instances'][0]['InstanceId']
 

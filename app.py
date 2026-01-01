@@ -413,6 +413,9 @@ def main():
 
             st.caption(f"已选配置: **{target_instance_type}** | **{os_type}** | **{volume_size}GB {volume_type}**")
             
+            # Spot Option
+            use_spot = st.checkbox("启用 Spot 实例 (Spot Mode)", help="使用竞价实例以降低成本，但可能会被中断")
+            
             # 2.1 Batch Launch Selection
             st.write("选择要部署的 AWS 账号 (可多选):")
             
@@ -461,7 +464,8 @@ def main():
                                 image_type=image_type_code,
                                 volume_size=volume_size,
                                 volume_type=volume_type,
-                                proxy_url=proxy_url
+                                proxy_url=proxy_url,
+                                use_spot=use_spot
                             )
                             
                             if result['status'] == 'success':
