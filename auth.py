@@ -33,8 +33,13 @@ def init_authenticator():
 def login_page(authenticator, credentials):
     """Render the login/signup page using Authenticator."""
     
-    # Render Login Widget
-    name, authentication_status, username = authenticator.login(location="main")
+    result = authenticator.login(location="main")
+    if isinstance(result, tuple) and len(result) == 3:
+        name, authentication_status, username = result
+    else:
+        name = st.session_state.get("name")
+        authentication_status = st.session_state.get("authentication_status")
+        username = st.session_state.get("username")
     
     # Handle Authentication Status
     st.session_state["authentication_status"] = authentication_status
