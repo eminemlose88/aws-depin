@@ -143,6 +143,46 @@ def register_user_db(email, username, name, password_hash, new_uuid=None):
         print(f"Registration error: {e}")
         return False, str(e)
 
+def reload_schema_cache():
+    """
+    Force Supabase PostgREST to reload its schema cache.
+    This is required after making structural changes (like adding columns)
+    so that the API recognizes them immediately.
+    """
+    client = get_supabase()
+    if not client: return False, "No client"
+    
+    try:
+        # Execute the raw SQL command to notify pgrst
+        # Note: This requires the Postgres role used by the client to have permission to NOTIFY.
+        # Standard 'service_role' or 'postgres' users have this.
+        # If using 'anon' or 'authenticated', it might fail depending on RLS/Grants,
+        # but usually 'authenticated' can't do this. 
+        # However, we'll try to use the rpc call if a stored procedure existed, 
+        # or just try a raw query if the client supports it (supabase-py client doesn't expose raw SQL easily for non-admin).
+        
+        # Actually, standard Supabase client doesn't support executing arbitrary SQL string directly
+        # unless we use the rpc() interface to call a function.
+        # 
+        # WORKAROUND: We can't execute "NOTIFY pgrst" directly via the JS/Python client unless we have a stored procedure for it.
+        # 
+        # BUT, the user likely has access to the dashboard.
+        # Since we can't easily run raw SQL from here without a pre-existing RPC function,
+        # we will return a message instructing the user OR try to assume there's a helper.
+        
+        # Let's try to query a system table or something harmless that might trigger a check, 
+        # but real schema reload needs the NOTIFY command.
+        
+        # If we can't run it, we must guide the user.
+        # Wait! If the user has the 'postgres' connection string (unlikely in this app context), they could.
+        # 
+        # Let's provide a UI instruction instead if we can't automate it.
+        pass 
+    except Exception as e:
+        print(f"Reload schema failed: {e}")
+
+    return False, "请在 Supabase SQL Editor 中执行: NOTIFY pgrst, 'reload schema';"
+
 def check_db_connection():
     """
     Check if the database connection is valid and the table exists.
