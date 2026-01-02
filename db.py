@@ -90,7 +90,7 @@ def check_db_connection():
 
 # --- AWS Credentials Management ---
 
-def add_aws_credential(user_id, alias, ak, sk):
+def add_aws_credential(user_id, alias, ak, sk, proxy=None):
     """Add a new AWS credential for the user."""
     client = get_supabase()
     if not client: return None
@@ -101,7 +101,8 @@ def add_aws_credential(user_id, alias, ak, sk):
             "alias_name": alias,
             "access_key_id": ak.strip(),
             "secret_access_key": sk.strip(),
-            "status": "active" # Default status
+            "status": "active", # Default status
+            "proxy_url": proxy.strip() if proxy else None
         }
         response = client.table("aws_credentials").insert(data).execute()
         return response.data
