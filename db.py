@@ -64,6 +64,85 @@ def get_supabase():
         return st.session_state["supabase_client"]
     return _global_supabase
 
+# --- Authentication Helpers (Streamlit-Authenticator) ---
+
+def fetch_all_users():
+    """
+    Fetch all users from profiles table.
+    Returns a dictionary formatted for streamlit-authenticator.
+    """
+    client = get_supabase()
+    if not client: return {}
+    
+    try:
+        # Fetch all profiles
+        response = client.table("profiles").select("*").execute()
+        if not response.data:
+            return {}
+            
+        users_dict = {}
+        for user in response.data:
+            username = user.get("username")
+            if username:
+                users_dict[username] = {
+                    "email": user.get("email"),
+                    "name": user.get("name") or username,
+                    "password": user.get("password"), # Hashed password
+                    "id": user.get("id") # Keep ID for reference
+                }
+        return users_dict
+    except Exception as e:
+        print(f"Error fetching users: {e}")
+        return {}
+
+def register_user_db(email, username, name, password_hash, new_uuid=None):
+    """
+    Register or update a user in the database.
+    If email exists, update the record (preserves ID).
+    If new, insert with new UUID.
+    """
+    client = get_supabase()
+    if not client: return False, "Database connection failed"
+    
+    try:
+        # 1. Check if email exists
+        res = client.table("profiles").select("id").eq("email", email).execute()
+        
+        if res.data:
+            # Update existing user
+            user_id = res.data[0]['id']
+            client.table("profiles").update({
+                "username": username,
+                "name": name,
+                "password": password_hash
+            }).eq("id", user_id).execute()
+            return True, "User updated successfully (ID preserved)"
+        else:
+            # Insert new user
+            # Note: We can't easily insert into profiles if it's linked to auth.users via foreign key
+            # unless we also create a user in auth.users.
+            # However, since we are moving AWAY from Supabase Auth for login,
+            # we might encounter RLS or FK issues if we try to insert a random UUID.
+            # Ideally, we should still use Supabase Auth to generate the UUID, 
+            # OR we must ensure 'profiles' is decoupled.
+            # For this hybrid approach, we will assume we can insert.
+            
+            import uuid
+            new_id = str(uuid.uuid4()) if not new_uuid else new_uuid
+            
+            client.table("profiles").insert({
+                "id": new_id,
+                "email": email,
+                "username": username,
+                "name": name,
+                "password": password_hash
+            }).execute()
+            return True, "User registered successfully"
+            
+    except Exception as e:
+        print(f"Registration error: {e}")
+        return False, str(e)
+
 def check_db_connection():
     """
     Check if the database connection is valid and the table exists.

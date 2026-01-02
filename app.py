@@ -4,12 +4,11 @@ import json
 import os
 import pandas as pd
 import time
-import extra_streamlit_components as stx
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity, get_vcpu_quota, has_running_instances
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status, update_aws_credential, get_all_instance_types, get_credential_vcpu_usage, delete_instance
-from auth import login_page, get_current_user, sign_out
+from auth import login_page, init_authenticator
 from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
 
 # Import Admin Dashboard
@@ -17,8 +16,24 @@ from admin import admin_dashboard
 
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
 
-# Initialize Cookie Manager (Must be done in the main script flow)
-# cookie_manager = stx.CookieManager(key="auth_cookie_manager")
+# Initialize Authenticator
+authenticator = init_authenticator()
+
+# Check authentication status
+if not st.session_state.get("authentication_status"):
+    login_page(authenticator)
+    st.stop()
+
+# Get Current User Info from Session
+user_id = st.session_state["user_id"]
+user_role = st.session_state.get("user_role", "user")
+username = st.session_state["username"]
+user_name = st.session_state.get("name", username)
+
+# --- Admin Mode Router ---
+if "admin_mode" in st.session_state and st.session_state["admin_mode"]:
+    admin_dashboard()
+    st.stop() # Stop rendering the rest of the app
 
 CONFIG_FILE = 'config.json'
 
@@ -41,54 +56,22 @@ def save_config(config_data):
     except Exception as e:
         st.sidebar.error(f"保存失败: {e}")
 
-# Check authentication status
-user = get_current_user()
-
-if not user:
-    login_page()
-    st.stop()
-
-# Force refresh user role from DB to ensure instant admin access after DB update
-if user:
-    try:
-        # Assuming get_user_profile logic was moved or role is handled differently.
-        # Since we removed billing.py import which had get_user_profile, we might need a simple fallback 
-        # or just skip role check if it relied on billing table. 
-        # For now, let's just assume user role is 'user' or handled elsewhere if get_user_profile is gone.
-        # If get_user_profile was ONLY in billing, we need to remove this block or fix it.
-        # Let's remove the block for now as per "remove billing system" request.
-        pass
-    except Exception as e:
-        print(f"Role refresh failed: {e}")
-
-# --- Admin Mode Router ---
-if "admin_mode" in st.session_state and st.session_state["admin_mode"]:
-    admin_dashboard()
-    st.stop() # Stop rendering the rest of the app
-
 # --- Main App (Authenticated) ---
 
-st.sidebar.markdown(f"👤 **{user.email}**")
-
-# Billing Info REMOVED
+st.sidebar.markdown(f"👤 **{user_name}** ({username})")
 
 # Admin Entry Button
-if "user_role" in st.session_state and st.session_state["user_role"] == 'admin':
+if user_role == 'admin':
     st.sidebar.markdown("---")
     if st.sidebar.button("🛡️ 进入管理员后台", type="primary"):
         st.session_state["admin_mode"] = True
         st.rerun()
 
 st.sidebar.markdown("---")
-if st.sidebar.button("登出"):
-    sign_out()
-    st.rerun()
+authenticator.logout("登出", "sidebar")
 
 st.title("AWS DePIN Launcher (Pro)")
 st.markdown("多账号管理与一键部署平台。")
-
-# Tabs
-# tab_creds, tab_deploy, tab_manage, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "🛠️ 工具箱"])
 
 # Load config globally to avoid scoping issues
 config = load_config()
@@ -100,7 +83,7 @@ def main():
     tab_creds, tab_deploy, tab_manage, tab_tools = st.tabs(["🔑 凭证管理", "🚀 部署节点", "⚙️ 实例监控", "🛠️ 工具箱"])
     
     # Pre-fetch credentials for global use in all tabs
-    creds = get_user_credentials(user.id)
+    creds = get_user_credentials(user_id)
     cred_lookup = {c['id']: c for c in creds} if creds else {}
 
     # ====================
@@ -130,7 +113,7 @@ def main():
                             if len(parts) >= 3:
                                 alias, ak, sk = parts[0], parts[1], parts[2]
                                 proxy = parts[3] if len(parts) > 3 else None
-                                if add_aws_credential(user.id, alias, ak, sk, proxy):
+                                if add_aws_credential(user_id, alias, ak, sk, proxy):
                                     success_count += 1
                                 else:
                                     fail_count += 1
@@ -154,7 +137,7 @@ def main():
             if st.button("🏥 一键体检 (含配额)", help="并发检查所有账号的状态及配额"):
                 # Check balance removed
                 with st.spinner("正在并发检查所有账号健康状态与配额..."):
-                    creds = get_user_credentials(user.id)
+                    creds = get_user_credentials(user_id)
                     if not creds:
                         st.warning("无账号可检查")
                     else:
@@ -242,7 +225,7 @@ def main():
                     if not alias or not ak or not sk:
                         st.error("请填写完整信息")
                     else:
-                        res = add_aws_credential(user.id, alias, ak, sk, proxy)
+                        res = add_aws_credential(user_id, alias, ak, sk, proxy)
                         if res:
                             st.success("凭证添加成功！")
                             st.rerun()
@@ -250,7 +233,7 @@ def main():
                             st.error("添加失败，请重试")
 
         # List existing credentials
-        # creds = get_user_credentials(user.id) # Already loaded in main()
+        # creds = get_user_credentials(user_id) # Already loaded in main()
         if creds:
             st.subheader("已保存的凭证")
             for cred in creds:
@@ -331,7 +314,7 @@ def main():
                             with c1:
                                 if st.form_submit_button("💾 保存修改"):
                                     # Pass full info for upsert
-                                    success, msg = update_aws_credential(cred['id'], user.id, new_alias, new_ak, new_sk, new_proxy, cred.get('status', 'active'))
+                                    success, msg = update_aws_credential(cred['id'], user_id, new_alias, new_ak, new_sk, new_proxy, cred.get('status', 'active'))
                                     if success:
                                         st.success("更新成功！")
                                         st.session_state[f"edit_mode_{cred['id']}"] = False
@@ -494,7 +477,7 @@ def main():
                             if result['status'] == 'success':
                                 try:
                                     log_instance(
-                                        user_id=user.id,
+                                        user_id=user_id,
                                         credential_id=cred['id'],
                                         instance_id=result['id'],
                                         ip=result['ip'],
@@ -583,7 +566,7 @@ def main():
                 
                 with st.spinner("正在进行全量深度检查 (并发优化版)..."):
                     # 1. Fetch current instances from DB
-                    current_instances = get_user_instances(user.id)
+                    current_instances = get_user_instances(user_id)
                     
                     # 2. Filter valid ones (Running only)
                     targets = [i for i in current_instances if i['status'] == 'running']
@@ -685,7 +668,7 @@ def main():
                                 )
                                 
                                 if aws_instances:
-                                    res = sync_instances(user.id, cred['id'], region_code, aws_instances)
+                                    res = sync_instances(user_id, cred['id'], region_code, aws_instances)
                                     return (res['new'], res['updated'], None)
                                 return (0, 0, None)
                             except Exception as e:
@@ -725,7 +708,7 @@ def main():
         # Load data (Cached or Fresh)
         if "display_data" not in st.session_state:
             with st.spinner("正在同步数据..."):
-                db_instances = get_user_instances(user.id)
+                db_instances = get_user_instances(user_id)
                 
                 if not db_instances:
                     st.info("暂无实例。")
