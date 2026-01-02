@@ -86,7 +86,21 @@ def register_form(authenticator):
             else:
                 try:
                     # Hash password
-                    hashed_pw = stauth.Hasher([password]).generate()[0]
+                    # Try-catch block to handle different streamlit-authenticator versions
+                    try:
+                         # Newer versions might require a single string or different init
+                         hashed_pw = stauth.Hasher([password]).generate()[0]
+                    except TypeError:
+                         # Fallback or alternate signature check
+                         # Some versions might implicitly handle single string or have different args
+                         # Let's try passing just the list if the error persists, 
+                         # but the error says "takes 1 positional argument but 2 were given"
+                         # This implies Hasher([pw]) is being interpreted as Hasher(self, [pw]) which is correct,
+                         # UNLESS the user is on a version where __init__ doesn't take args?
+                         # Actually, the error "Hasher.init() takes 1 positional argument but 2 were given"
+                         # usually means __init__(self) takes no args, but we passed one.
+                         # This happens in v0.4.0+ where you do Hasher().hash(password)
+                         hashed_pw = stauth.Hasher().hash(password)
                     
                     # Register in DB
                     success, msg = register_user_db(email, username, name, hashed_pw)
