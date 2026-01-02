@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from logic import launch_base_instance, AMI_MAPPING, get_instance_status, terminate_instance, scan_all_instances, check_account_health, check_capacity, get_vcpu_quota, has_running_instances
 from templates import PROJECT_REGISTRY, generate_script
 from db import log_instance, get_user_instances, update_instance_status, add_aws_credential, get_user_credentials, delete_aws_credential, sync_instances, update_credential_status, get_instance_private_key, update_instance_health, update_instance_projects_status, update_aws_credential, get_all_instance_types, get_credential_vcpu_usage, delete_instance
-from auth import login_page, init_authenticator
+from auth import login_page, init_authenticator, ensure_session_state
 from monitor import check_instance_process, install_project_via_ssh, detect_installed_project
 
 # Import Admin Dashboard
@@ -25,23 +25,11 @@ if not st.session_state.get("authentication_status"):
     st.stop()
 
 # Get Current User Info from Session
-# Defensive check: Ensure user_id is set
-if "user_id" not in st.session_state:
-    # Try to recover if username is present
-    if "username" in st.session_state:
-        # Re-fetch user info from authenticator credentials
-        # (This handles cases where login_page set auth status but didn't reach user_id set)
-        u_name = st.session_state["username"]
-        u_info = authenticator.credentials['usernames'].get(u_name)
-        if u_info:
-            st.session_state["user_id"] = u_info.get("id")
-            st.session_state["user_role"] = "user"
-    
-    # Final check
-    if "user_id" not in st.session_state:
-        st.warning("登录状态数据不同步，正在重置...")
-        authenticator.logout("请重新登录", "main")
-        st.stop()
+# Ensure session state is fully initialized (handle auto-login case)
+if not ensure_session_state(authenticator):
+    st.warning("登录状态同步失败，请重新登录。")
+    authenticator.logout("登出", "main")
+    st.stop()
 
 user_id = st.session_state["user_id"]
 user_role = st.session_state.get("user_role", "user")

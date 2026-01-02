@@ -107,6 +107,27 @@ def register_form(authenticator):
                 except Exception as e:
                     st.error(f"注册异常: {e}")
 
+def ensure_session_state(authenticator):
+    """
+    Ensure critical session state variables (like user_id) are initialized.
+    This is necessary because if a user is auto-logged in via cookie, 
+    the login_page() logic might be skipped.
+    """
+    if "user_id" not in st.session_state:
+        if "username" in st.session_state:
+            username = st.session_state["username"]
+            user_info = authenticator.credentials['usernames'].get(username)
+            if user_info:
+                st.session_state["user_id"] = user_info.get("id")
+                st.session_state["user_role"] = "user" # Default
+                
+                # Initialize Supabase Client
+                if "supabase_client" not in st.session_state:
+                    st.session_state["supabase_client"] = create_supabase_client()
+                return True
+        return False # Failed to restore
+    return True # Already set
+
 # Legacy functions kept for reference/compatibility if needed, 
 # but they are effectively replaced by Authenticator logic.
 def sign_out():
