@@ -268,7 +268,7 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
             "instance_id": instance_id,
             "ip_address": ip,
             "region": region,
-            # "project_name": project_name, # DEPRECATED
+            "project_name": p_name, # FIXED: Ensure project_name is provided (NOT NULL constraint)
             "status": status,
             "private_key": encrypted_key,
             "proj_titan": is_titan,
@@ -293,6 +293,7 @@ def log_instance(user_id, credential_id, instance_id, ip, region, project_name, 
         print(f"Logged instance {instance_id} to database.")
     except Exception as e:
         print(f"Error logging to database: {e}")
+        raise # Re-raise exception to trigger rollback in app.py
 
 def get_user_instances(user_id):
     """
