@@ -486,9 +486,22 @@ def main():
                                     )
                                     return f"✅ {cred['alias_name']}: 成功 ({result['id']})"
                                 except Exception as db_err:
-                                    # Launch success but DB log failed
+                                    # Launch success but DB log failed -> ROLLBACK (Terminate Instance)
                                     print(f"DB Log Error: {db_err}")
-                                    return f"✅ {cred['alias_name']}: 启动成功但记录失败 ({result['id']}) - {str(db_err)}"
+                                    try:
+                                        # Attempt to terminate the zombie instance
+                                        terminate_instance(
+                                            cred['access_key_id'], 
+                                            cred['secret_access_key'], 
+                                            region, 
+                                            result['id'], 
+                                            proxy_url=proxy_url
+                                        )
+                                        rollback_msg = "实例已自动销毁"
+                                    except Exception as term_err:
+                                        rollback_msg = f"实例销毁失败 ({str(term_err)})，请手动处理！"
+                                        
+                                    return f"❌ {cred['alias_name']}: 数据库记录失败，{rollback_msg} - {str(db_err)}"
                             else:
                                 return f"❌ {cred['alias_name']}: 失败 - {result['msg']}"
                         except Exception as e:
