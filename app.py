@@ -28,7 +28,7 @@ if not st.session_state.get("authentication_status"):
 user_id = st.session_state["user_id"]
 user_role = st.session_state.get("user_role", "user")
 username = st.session_state["username"]
-# user_name = st.session_state.get("name", username) # Deprecated
+user_name = st.session_state.get("name", username)
 
 # --- Admin Mode Router ---
 if "admin_mode" in st.session_state and st.session_state["admin_mode"]:
@@ -58,7 +58,7 @@ def save_config(config_data):
 
 # --- Main App (Authenticated) ---
 
-st.sidebar.markdown(f"👤 **{username}**")
+st.sidebar.markdown(f"👤 **{user_name}** ({username})")
 
 # Admin Entry Button
 if user_role == 'admin':

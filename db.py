@@ -86,7 +86,7 @@ def fetch_all_users():
             if username:
                 users_dict[username] = {
                     "email": user.get("email"),
-                    "name": username, # Force name to be username
+                    "name": user.get("name") or username,
                     "password": user.get("password"), # Hashed password
                     "id": user.get("id") # Keep ID for reference
                 }
@@ -95,7 +95,7 @@ def fetch_all_users():
         print(f"Error fetching users: {e}")
         return {}
 
-def register_user_db(email, username, password_hash, new_uuid=None):
+def register_user_db(email, username, name, password_hash, new_uuid=None):
     """
     Register or update a user in the database.
     If email exists, update the record (preserves ID).
@@ -113,7 +113,7 @@ def register_user_db(email, username, password_hash, new_uuid=None):
             user_id = res.data[0]['id']
             client.table("profiles").update({
                 "username": username,
-                # "name": name, # Removed
+                "name": name,
                 "password": password_hash
             }).eq("id", user_id).execute()
             return True, "User updated successfully (ID preserved)"
@@ -134,7 +134,7 @@ def register_user_db(email, username, password_hash, new_uuid=None):
                 "id": new_id,
                 "email": email,
                 "username": username,
-                # "name": name, # Removed
+                "name": name,
                 "password": password_hash
             }).execute()
             return True, "User registered successfully"

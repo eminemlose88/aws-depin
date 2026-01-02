@@ -72,7 +72,7 @@ def register_form(authenticator):
         
         email = st.text_input("邮箱 (必须是唯一的)")
         username = st.text_input("用户名 (用于登录)")
-        # name = st.text_input("昵称") # Removed
+        name = st.text_input("昵称")
         password = st.text_input("密码", type="password")
         password_confirm = st.text_input("确认密码", type="password")
         
@@ -92,18 +92,10 @@ def register_form(authenticator):
                          hashed_pw = stauth.Hasher([password]).generate()[0]
                     except TypeError:
                          # Fallback or alternate signature check
-                         # Some versions might implicitly handle single string or have different args
-                         # Let's try passing just the list if the error persists, 
-                         # but the error says "takes 1 positional argument but 2 were given"
-                         # This implies Hasher([pw]) is being interpreted as Hasher(self, [pw]) which is correct,
-                         # UNLESS the user is on a version where __init__ doesn't take args?
-                         # Actually, the error "Hasher.init() takes 1 positional argument but 2 were given"
-                         # usually means __init__(self) takes no args, but we passed one.
-                         # This happens in v0.4.0+ where you do Hasher().hash(password)
                          hashed_pw = stauth.Hasher().hash(password)
                     
                     # Register in DB
-                    success, msg = register_user_db(email, username, hashed_pw)
+                    success, msg = register_user_db(email, username, name, hashed_pw)
                     
                     if success:
                         st.success("注册成功！请使用新账号登录。")
