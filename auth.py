@@ -72,7 +72,7 @@ def register_form(authenticator):
         
         email = st.text_input("邮箱 (必须是唯一的)")
         username = st.text_input("用户名 (用于登录)")
-        name = st.text_input("昵称")
+        # name = st.text_input("昵称") # Removed
         password = st.text_input("密码", type="password")
         password_confirm = st.text_input("确认密码", type="password")
         
@@ -103,7 +103,7 @@ def register_form(authenticator):
                          hashed_pw = stauth.Hasher().hash(password)
                     
                     # Register in DB
-                    success, msg = register_user_db(email, username, name, hashed_pw)
+                    success, msg = register_user_db(email, username, hashed_pw)
                     
                     if success:
                         st.success("注册成功！请使用新账号登录。")
