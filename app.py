@@ -69,7 +69,7 @@ if user_role == 'admin':
         st.rerun()
 
 st.sidebar.markdown("---")
-authenticator.logout("登出", "sidebar")
+authenticator.logout(location="sidebar")
 
 st.title("AWS DePIN Launcher (Pro)")
 st.markdown("多账号管理与一键部署平台。")
