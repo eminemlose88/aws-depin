@@ -502,10 +502,20 @@ def sync_instances(user_id, credential_id, region, aws_instances):
     # 3. Batch Insert New Instances
     if new_instances_data:
         try:
+            print(f"DEBUG: Attempting to batch insert {len(new_instances_data)} instances...")
             client.table("instances").insert(new_instances_data).execute()
             stats["new"] += len(new_instances_data)
+            print("DEBUG: Batch insert successful.")
         except Exception as e:
             print(f"Error batch importing instances: {e}")
+            # Try fallback: Insert one by one to find the specific error or succeed partially
+            print("DEBUG: Retrying with single inserts...")
+            for item in new_instances_data:
+                try:
+                    client.table("instances").insert(item).execute()
+                    stats["new"] += 1
+                except Exception as inner_e:
+                    print(f"Failed to insert instance {item['instance_id']}: {inner_e}")
 
     # 4. Process Missing instances (Mark as Terminated -> Delete)
     for db_id, db_status in db_map.items():
