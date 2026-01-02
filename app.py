@@ -25,6 +25,24 @@ if not st.session_state.get("authentication_status"):
     st.stop()
 
 # Get Current User Info from Session
+# Defensive check: Ensure user_id is set
+if "user_id" not in st.session_state:
+    # Try to recover if username is present
+    if "username" in st.session_state:
+        # Re-fetch user info from authenticator credentials
+        # (This handles cases where login_page set auth status but didn't reach user_id set)
+        u_name = st.session_state["username"]
+        u_info = authenticator.credentials['usernames'].get(u_name)
+        if u_info:
+            st.session_state["user_id"] = u_info.get("id")
+            st.session_state["user_role"] = "user"
+    
+    # Final check
+    if "user_id" not in st.session_state:
+        st.warning("登录状态数据不同步，正在重置...")
+        authenticator.logout("请重新登录", "main")
+        st.stop()
+
 user_id = st.session_state["user_id"]
 user_role = st.session_state.get("user_role", "user")
 username = st.session_state["username"]
