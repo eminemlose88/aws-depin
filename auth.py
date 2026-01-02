@@ -27,23 +27,23 @@ def init_authenticator():
         auto_hash=False # We handle hashing manually during register
     )
     
-    return authenticator
+    st.session_state["auth_credentials"] = credentials
+    return authenticator, credentials
 
-def login_page(authenticator):
+def login_page(authenticator, credentials):
     """Render the login/signup page using Authenticator."""
     
     # Render Login Widget
-    authenticator.login()
+    name, authentication_status, username = authenticator.login("登录", "main")
     
     # Handle Authentication Status
-    if st.session_state["authentication_status"]:
+    st.session_state["authentication_status"] = authentication_status
+    st.session_state["username"] = username
+    st.session_state["name"] = name
+    if authentication_status:
         # Success logic handled in app.py (rerun or main app render)
         # We just need to ensure the user ID is in session for DB queries
-        username = st.session_state["username"]
-        
-        # Find the user ID from the credentials
-        # (Authenticator stores config in 'credentials')
-        user_info = authenticator.credentials['usernames'].get(username)
+        user_info = credentials.get('usernames', {}).get(username)
         if user_info:
             st.session_state["user_id"] = user_info.get("id")
             st.session_state["user_role"] = "user" # Default, or fetch from DB if needed
@@ -53,12 +53,11 @@ def login_page(authenticator):
                 st.session_state["supabase_client"] = create_supabase_client()
         
         return True
-
-    elif st.session_state["authentication_status"] is False:
+    elif authentication_status is False:
         st.error("用户名/密码错误")
         return False
         
-    elif st.session_state["authentication_status"] is None:
+    elif authentication_status is None:
         # Show Register Tab if not logged in
         with st.expander("还没有账号？点击注册"):
             register_form(authenticator)
@@ -107,7 +106,7 @@ def register_form(authenticator):
                 except Exception as e:
                     st.error(f"注册异常: {e}")
 
-def ensure_session_state(authenticator):
+def ensure_session_state(credentials):
     """
     Ensure critical session state variables (like user_id) are initialized.
     This is necessary because if a user is auto-logged in via cookie, 
@@ -116,7 +115,7 @@ def ensure_session_state(authenticator):
     if "user_id" not in st.session_state:
         if "username" in st.session_state:
             username = st.session_state["username"]
-            user_info = authenticator.credentials['usernames'].get(username)
+            user_info = credentials.get('usernames', {}).get(username)
             if user_info:
                 st.session_state["user_id"] = user_info.get("id")
                 st.session_state["user_role"] = "user" # Default

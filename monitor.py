@@ -159,10 +159,8 @@ def detect_installed_project(ip, private_key_str):
              found_projects.append("Nexus")
              msgs.append("Nexus")
         else:
-             # Fallback: Check process (prover or nexus-cli or cargo run)
-             # "prover" is the binary name often used by Nexus beta
-             # "nexus-cli" is the CLI tool
-             stdin, stdout, stderr = client.exec_command("pgrep -f 'prover|nexus|cargo'")
+             # Fallback: Check process
+             stdin, stdout, stderr = client.exec_command("pgrep -f prover")
              if stdout.read().decode().strip():
                  found_projects.append("Nexus")
                  msgs.append("Nexus(Proc)")

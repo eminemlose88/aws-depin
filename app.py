@@ -17,20 +17,15 @@ from admin import admin_dashboard
 st.set_page_config(page_title="AWS DePIN Launcher", page_icon="🚀", layout="wide")
 
 # Initialize Authenticator
-authenticator = init_authenticator()
+authenticator, credentials = init_authenticator()
+ensure_session_state(credentials)
 
 # Check authentication status
 if not st.session_state.get("authentication_status"):
-    login_page(authenticator)
+    login_page(authenticator, credentials)
     st.stop()
 
 # Get Current User Info from Session
-# Ensure session state is fully initialized (handle auto-login case)
-if not ensure_session_state(authenticator):
-    st.warning("登录状态同步失败，请重新登录。")
-    authenticator.logout("登出", "main")
-    st.stop()
-
 user_id = st.session_state["user_id"]
 user_role = st.session_state.get("user_role", "user")
 username = st.session_state["username"]
@@ -1288,17 +1283,6 @@ def main():
                 st.error(f"生成失败: {str(e)}")
 
         st.divider()
-        
-        st.subheader("🛠️ 数据库维护")
-        with st.expander("刷新数据库架构缓存 (解决 PGRST204 错误)", expanded=True):
-            st.info("如果您在 Supabase SQL Editor 中添加了新列 (如 username/name/password) 但注册时仍报错 `Could not find the '...' column`，请按下方说明操作。")
-            st.markdown("""
-            **Supabase API 不会自动检测表结构的变更。** 您必须手动通知它刷新缓存。
-            
-            请复制以下 SQL 命令，在 **Supabase SQL Editor** 中运行一次：
-            """)
-            st.code("NOTIFY pgrst, 'reload schema';", language="sql")
-            st.caption("运行后，无需重启应用，直接重试注册即可。")
 
 if __name__ == "__main__":
     main()

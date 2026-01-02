@@ -67,7 +67,7 @@ sudo ./apphub restart
     },
     "Nexus_Prover": {
         "description": "Nexus Prover (Limited to 3 vCPU / 16GB RAM)",
-        "params": ["wallet_address"],
+        "params": ["prover_id"],
         "script_template": """#!/bin/bash
 # Install dependencies
 if [ -f /etc/debian_version ]; then
@@ -78,43 +78,16 @@ else
     yum groupinstall -y "Development Tools"
 fi
 
-# Install Rust (Required for some environments, though binary should be self-contained)
+# Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 
-# Install Nexus CLI (Non-Interactive)
-curl -sSf https://cli.nexus.xyz/ -o /tmp/nexus-install.sh
-chmod +x /tmp/nexus-install.sh
-# Run as root to install to /root/.nexus
-NONINTERACTIVE=1 /tmp/nexus-install.sh
+# Clone and Build Nexus (Assuming official repo structure)
+# Note: As of late 2024, Nexus usually provides a CLI or script. 
+# Using the standard install command from their docs:
+curl https://cli.nexus.xyz/ | sh
 
-# Register with Wallet
-# The binary is named 'nexus-cli' in recent versions
-CLI_PATH="$HOME/.nexus/bin/nexus-cli"
-
-if [ -f "$CLI_PATH" ]; then
-    # New flow: register-user then register-node
-    # But wait, register-user is deprecated? Or register-node needs args?
-    # The error says: "Please run 'nexus-cli register-node' first"
-    # And "User registered, but no node found"
-    
-    $CLI_PATH register-user --wallet-address {wallet_address}
-    sleep 5
-    # Automatically register node (might be interactive, try with NONINTERACTIVE or default)
-    # Based on docs, register-node might need --node-id or generate one
-    # Try auto-generation
-    $CLI_PATH register-node
-else
-    # Fallback/Wait
-    echo "Waiting for installation..."
-    sleep 10
-    $CLI_PATH register-user --wallet-address {wallet_address}
-    sleep 5
-    $CLI_PATH register-node
-fi
-
-# Configure Systemd Service
-# Uses nexus-cli start --headless
+# Configure Systemd Service with Limits
 cat <<EOF > /etc/systemd/system/nexus-prover.service
 [Unit]
 Description=Nexus Prover Service
@@ -123,10 +96,9 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/root/.nexus/bin/nexus-cli start --headless
+ExecStart=/root/.nexus/bin/prover start --id {prover_id}
 Restart=always
 RestartSec=5
-Environment=NONINTERACTIVE=1
 # Resource Limits
 CPUQuota=300%
 MemoryLimit=16G
