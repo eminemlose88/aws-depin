@@ -479,7 +479,7 @@ def sync_instances(user_id, credential_id, region, aws_instances):
                     "instance_id": aws_id,
                     "ip_address": aws_info['ip_address'],
                     "region": region,
-                    # "project_name": aws_info['project_name'], # DEPRECATED
+                    "project_name": aws_info.get('project_name') or "Pending", # Re-enabled with fallback
                     "status": aws_status,
                     "proj_titan": False,
                     "proj_nexus": False,
