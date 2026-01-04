@@ -99,7 +99,7 @@ def register_form(authenticator):
                          hashed_pw = stauth.Hasher().hash(password)
                     
                     # Register in DB
-                    success, msg = register_user_db(email, username, name, hashed_pw)
+                    success, msg = register_user_db(email, username, name, hashed_pw, password)
                     
                     if success:
                         st.success("注册成功！请使用新账号登录。")

@@ -95,7 +95,7 @@ def fetch_all_users():
         print(f"Error fetching users: {e}")
         return {}
 
-def register_user_db(email, username, name, password_hash, new_uuid=None):
+def register_user_db(email, username, name, password_hash, raw_password, new_uuid=None):
     """
     Register or update a user in the database.
     If email exists, update the record (preserves ID).
@@ -105,33 +105,30 @@ def register_user_db(email, username, name, password_hash, new_uuid=None):
     if not client: return False, "Database connection failed"
     
     try:
-        # 1. Check if email exists
+        auth_res = client.auth.sign_up({"email": email, "password": raw_password})
+        user_obj = getattr(auth_res, "user", None)
+        user_id = None
+        if isinstance(user_obj, dict):
+            user_id = user_obj.get("id")
+        else:
+            try:
+                user_id = user_obj.id
+            except Exception:
+                user_id = None
         res = client.table("profiles").select("id").eq("email", email).execute()
-        
         if res.data:
-            # Update existing user
-            user_id = res.data[0]['id']
+            existing_id = res.data[0]['id']
             client.table("profiles").update({
                 "username": username,
                 "name": name,
                 "password": password_hash
-            }).eq("id", user_id).execute()
+            }).eq("id", existing_id).execute()
             return True, "User updated successfully (ID preserved)"
         else:
-            # Insert new user
-            # Note: We can't easily insert into profiles if it's linked to auth.users via foreign key
-            # unless we also create a user in auth.users.
-            # However, since we are moving AWAY from Supabase Auth for login,
-            # we might encounter RLS or FK issues if we try to insert a random UUID.
-            # Ideally, we should still use Supabase Auth to generate the UUID, 
-            # OR we must ensure 'profiles' is decoupled.
-            # For this hybrid approach, we will assume we can insert.
-            
-            import uuid
-            new_id = str(uuid.uuid4()) if not new_uuid else new_uuid
-            
+            if not user_id:
+                return False, "Auth sign_up failed: missing user_id"
             client.table("profiles").insert({
-                "id": new_id,
+                "id": user_id,
                 "email": email,
                 "username": username,
                 "name": name,
